@@ -99,8 +99,8 @@ draw_box() {
     local subtitle_len=${#subtitle}
     local max_len=$((title_len > subtitle_len ? title_len : subtitle_len))
     local width=$((max_len + 6))  # Add padding
-    [ $width -lt 50 ] && width=50
-    [ $width -gt 80 ] && width=80
+    [[ $width -lt 50 ]] && width=50
+    [[ $width -gt 80 ]] && width=80
     
     # Generate horizontal line
     local line=""
@@ -140,8 +140,8 @@ draw_section() {
     # Calculate width based on title
     local title_len=${#title}
     local width=$((title_len + 10))
-    [ $width -lt 50 ] && width=50
-    [ $width -gt 80 ] && width=80
+    [[ $width -lt 50 ]] && width=50
+    [[ $width -gt 80 ]] && width=80
     
     # Generate line
     local line=""
@@ -411,7 +411,7 @@ filter_archives() {
         ((included_count++))
     done
     
-    if [ $excluded_count -gt 0 ]; then
+    if [[ $excluded_count -gt 0 ]]; then
         log_info "Filtered: $included_count included, $excluded_count excluded"
     fi
     
@@ -568,7 +568,7 @@ decompile_worker() {
     fi
     
     # Update progress (atomic write)
-    if [ $status -eq 0 ] && [ -f "$final_file" ]; then
+    if [[ $status -eq 0 ]] && [[ -f "$final_file" ]]; then
         echo "OK:${obj_name}" >> "$progress_file"
     else
         echo "FAIL:${obj_name}" >> "$progress_file"
@@ -664,7 +664,7 @@ decompile_library() {
         
         for obj_file in "${obj_files[@]}"; do
             # Wait for free slot
-            while [ $running -ge $PARALLEL_JOBS ]; do
+            while [[ $running -ge $PARALLEL_JOBS ]]; do
                 local new_pids=()
                 for pid in "${bg_pids[@]}"; do
                     if kill -0 "$pid" 2>/dev/null; then
@@ -678,7 +678,7 @@ decompile_library() {
                 
                 completed=$(wc -l < "$progress_file" 2>/dev/null || echo 0)
                 
-                if [ "$completed" -gt "$prev_count" ]; then
+                if [[ "$completed" -gt "$prev_count" ]]; then
                     last_completed_file=$(tail -1 "$progress_file" 2>/dev/null | cut -d: -f2)
                     prev_count=$completed
                 fi
@@ -686,7 +686,7 @@ decompile_library() {
                 local now=$(date +%s)
                 local elapsed=$((now - start_time))
                 local eta=0
-                if [ $completed -gt 0 ]; then
+                if [[ $completed -gt 0 ]]; then
                     local avg=$((elapsed / completed))
                     eta=$(((total - completed) * avg))
                 fi
@@ -702,7 +702,7 @@ decompile_library() {
         done
         
         # Wait for all tasks to complete
-        while [ $running -gt 0 ]; do
+        while [[ $running -gt 0 ]]; do
             local new_pids=()
             for pid in "${bg_pids[@]}"; do
                 if kill -0 "$pid" 2>/dev/null; then
@@ -716,7 +716,7 @@ decompile_library() {
             
             completed=$(wc -l < "$progress_file" 2>/dev/null || echo 0)
             
-            if [ "$completed" -gt "$prev_count" ]; then
+            if [[ "$completed" -gt "$prev_count" ]]; then
                 last_completed_file=$(tail -1 "$progress_file" 2>/dev/null | cut -d: -f2)
                 prev_count=$completed
             fi
@@ -724,7 +724,7 @@ decompile_library() {
             local now=$(date +%s)
             local elapsed=$((now - start_time))
             local eta=0
-            if [ $completed -gt 0 ]; then
+            if [[ $completed -gt 0 ]]; then
                 local avg=$((elapsed / completed))
                 eta=$(((total - completed) * avg))
             fi
@@ -743,9 +743,11 @@ decompile_library() {
     
     show_progress_final $total $total_elapsed
     
-    # Statistics
-    local success_count=$(grep -c "^OK:" "$progress_file" 2>/dev/null || echo 0)
-    local fail_count=$(grep -c "^FAIL:" "$progress_file" 2>/dev/null || echo 0)
+    # Statistics - use tr to remove any whitespace
+    local success_count=$(grep -c "^OK:" "$progress_file" 2>/dev/null | tr -d '[:space:]')
+    local fail_count=$(grep -c "^FAIL:" "$progress_file" 2>/dev/null | tr -d '[:space:]')
+    [[ -z "$success_count" ]] && success_count=0
+    [[ -z "$fail_count" ]] && fail_count=0
     
     # Record failed files
     grep "^FAIL:" "$progress_file" 2>/dev/null | cut -d: -f2 > "$lib_output/logs/failed_files.txt"
@@ -758,11 +760,11 @@ decompile_library() {
     echo ""
     draw_section "${YELLOW}" "Statistics - ${lib_name}"
     echo -e "  ${GREEN}Success:${NC} $success_count files"
-    if [ $fail_count -gt 0 ]; then
+    if [[ $fail_count -gt 0 ]]; then
         echo -e "  ${RED}Failed:${NC} $fail_count files (see logs/failed_files.txt)"
     fi
     echo -e "  ${BLUE}Duration:${NC} $(format_time $total_elapsed)"
-    if [ $total -gt 0 ] && [ $total_elapsed -gt 0 ]; then
+    if [[ $total -gt 0 ]] && [[ $total_elapsed -gt 0 ]]; then
         local avg_time=$((total_elapsed / total))
         echo -e "  ${BLUE}Average:${NC} $(format_time $avg_time)/file (with parallelization)"
     fi
