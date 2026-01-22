@@ -244,29 +244,59 @@ scan_archives() {
     find "$dir" -name "*.a" -type f 2>/dev/null | sort
 }
 
-# Scan directory for header files
-scan_headers() {
-    local dir="$1"
-    local include_dirs=()
+# Find include directory associated with a specific .a file
+# Strategy: Look for 'include' directory as sibling or ancestor of the .a file
+find_library_headers() {
+    local archive_path="$1"
+    local archive_dir=$(dirname "$archive_path")
+    local found_includes=()
     
-    # Find directories containing header files
-    while IFS= read -r header; do
-        local header_dir=$(dirname "$header")
-        # Get the topmost include directory
-        while [[ "$header_dir" == *"/include/"* ]]; do
-            header_dir=$(dirname "$header_dir")
-        done
-        if [[ "$header_dir" == *"/include" ]]; then
-            include_dirs+=("$header_dir")
-        else
-            # Check if parent is an include-like directory
-            local parent=$(dirname "$header")
-            include_dirs+=("$parent")
+    # Strategy 1: Look for 'include' as sibling directory
+    # e.g., lib/foo.a -> include/
+    local parent_dir=$(dirname "$archive_dir")
+    while [ "$parent_dir" != "/" ] && [ "$parent_dir" != "." ]; do
+        local include_candidate="$parent_dir/include"
+        if [ -d "$include_candidate" ]; then
+            # Verify it contains headers
+            if find "$include_candidate" \( -name "*.h" -o -name "*.hpp" \) -type f | head -1 | grep -q .; then
+                found_includes+=("$include_candidate")
+                break
+            fi
         fi
-    done < <(find "$dir" \( -name "*.h" -o -name "*.hpp" \) -type f 2>/dev/null)
+        parent_dir=$(dirname "$parent_dir")
+    done
+    
+    # Strategy 2: Look for include directory at same level as lib directory
+    # e.g., component/lib/foo.a -> component/include/
+    local lib_parent=$(dirname "$archive_dir")
+    if [[ "$archive_dir" == *"/lib"* ]]; then
+        # Navigate up to find the component root
+        local component_root="$archive_dir"
+        while [[ "$component_root" == *"/lib"* ]] && [[ "$(basename "$component_root")" != "lib" ]]; do
+            component_root=$(dirname "$component_root")
+        done
+        component_root=$(dirname "$component_root")
+        
+        local include_candidate="$component_root/include"
+        if [ -d "$include_candidate" ]; then
+            if find "$include_candidate" \( -name "*.h" -o -name "*.hpp" \) -type f | head -1 | grep -q .; then
+                # Check if not already added
+                local already_added=false
+                for inc in "${found_includes[@]}"; do
+                    if [ "$inc" = "$include_candidate" ]; then
+                        already_added=true
+                        break
+                    fi
+                done
+                if [ "$already_added" = false ]; then
+                    found_includes+=("$include_candidate")
+                fi
+            fi
+        fi
+    fi
     
     # Return unique directories
-    printf '%s\n' "${include_dirs[@]}" | sort -u
+    printf '%s\n' "${found_includes[@]}" | sort -u
 }
 
 extract_objects() {
@@ -381,8 +411,7 @@ export -f decompile_worker
 decompile_library() {
     local lib_name="$1"
     local archive_file="$2"
-    local include_dirs="$3"
-    local output_base="$4"
+    local output_base="$3"
     
     local lib_output="${output_base}/${lib_name}"
     
@@ -405,13 +434,18 @@ decompile_library() {
     mkdir -p "$lib_output/logs"
     mkdir -p "$lib_output/include"
     
-    # Copy header files
+    # Find and copy header files associated with this specific library
+    local include_dirs=$(find_library_headers "$archive_file")
     if [ -n "$include_dirs" ]; then
+        log_info "Found associated include directories:"
         echo "$include_dirs" | while IFS= read -r inc_dir; do
+            echo "  - $inc_dir"
             if [ -d "$inc_dir" ]; then
                 copy_headers "$inc_dir" "$lib_output/include"
             fi
         done
+    else
+        log_warn "No associated include directory found for this library"
     fi
     
     # Create temp directory for extraction
@@ -799,15 +833,6 @@ main() {
     # Check dependencies
     check_dependencies
     
-    # Scan for headers
-    INCLUDE_DIRS=$(scan_headers "$TARGET_DIR")
-    if [ -n "$INCLUDE_DIRS" ]; then
-        log_info "Found header directories:"
-        echo "$INCLUDE_DIRS" | while IFS= read -r dir; do
-            echo "  - $dir"
-        done
-    fi
-    
     # Clean output
     if [ "$CLEAN_OUTPUT" = true ] && [ -d "$OUTPUT_DIR" ]; then
         log_warn "Cleaning output directory: $OUTPUT_DIR"
@@ -826,7 +851,7 @@ main() {
         local lib_name=$(basename "$archive" .a)
         lib_name=${lib_name#lib}  # Remove lib prefix
         
-        decompile_library "$lib_name" "$archive" "$INCLUDE_DIRS" "$OUTPUT_DIR"
+        decompile_library "$lib_name" "$archive" "$OUTPUT_DIR"
     done
     
     # Generate global summary
