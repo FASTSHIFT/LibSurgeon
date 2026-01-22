@@ -954,10 +954,32 @@ main() {
     # Setup cleanup trap
     trap "cleanup" EXIT
     
+    # Track used library names to handle duplicates
+    declare -A used_lib_names
+    
     # Process each archive
     for archive in "${ARCHIVES[@]}"; do
         local lib_name=$(basename "$archive" .a)
         lib_name=${lib_name#lib}  # Remove lib prefix
+        
+        # Handle duplicate library names
+        if [ -n "${used_lib_names[$lib_name]}" ]; then
+            # Generate unique name using parent directory
+            local parent_dir=$(basename "$(dirname "$archive")")
+            local unique_name="${lib_name}_${parent_dir}"
+            
+            # If still duplicate, add counter
+            local counter=1
+            while [ -n "${used_lib_names[$unique_name]}" ]; do
+                unique_name="${lib_name}_${parent_dir}_${counter}"
+                ((counter++))
+            done
+            
+            log_warn "Duplicate library name '$lib_name', using '$unique_name'"
+            lib_name="$unique_name"
+        fi
+        
+        used_lib_names[$lib_name]=1
         
         decompile_library "$lib_name" "$archive" "$OUTPUT_DIR"
     done
