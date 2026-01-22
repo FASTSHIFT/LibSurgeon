@@ -41,6 +41,10 @@ TARGET_DIR=""
 CLEAN_OUTPUT=false
 LIST_ONLY=false
 
+# Filter patterns (arrays of glob patterns)
+declare -a EXCLUDE_PATTERNS=()
+declare -a INCLUDE_PATTERNS=()
+
 # Parallel processing (default: half of CPU cores)
 PARALLEL_JOBS=$(( ($(nproc) + 1) / 2 ))
 [ "$PARALLEL_JOBS" -lt 1 ] && PARALLEL_JOBS=1
@@ -87,7 +91,7 @@ format_time() {
     local seconds=$1
     if [ "$seconds" -lt 60 ]; then
         echo "${seconds}s"
-    elif [ "$seconds" -lt 3600 ]; then
+        elif [ "$seconds" -lt 3600 ]; then
         local mins=$((seconds / 60))
         local secs=$((seconds % 60))
         echo "${mins}m${secs}s"
@@ -172,14 +176,25 @@ Options:
   -g, --ghidra <path>     Path to Ghidra installation (REQUIRED)
   -o, --output <dir>      Output directory (default: ./libsurgeon_output)
   -j, --jobs <num>        Number of parallel jobs (default: $PARALLEL_JOBS)
+  -i, --include <pattern> Only include archives matching pattern (can be used multiple times)
+  -e, --exclude <pattern> Exclude archives matching pattern (can be used multiple times)
   -c, --clean             Clean previous output before processing
   -l, --list              List archive contents without decompiling
   -h, --help              Show this help message
 
+Filter Rules:
+  - If --include is specified, only matching archives are processed
+  - If --exclude is specified, matching archives are skipped
+  - --include is applied first, then --exclude
+  - Patterns support wildcards: * (any chars), ? (single char), [abc] (char set)
+
 Examples:
   $0 -g /opt/ghidra ./my_sdk/lib
   $0 -g /opt/ghidra -j 8 -o ./output ./vendor/libs
-  $0 -g /opt/ghidra --clean ./third_party
+  $0 -g /opt/ghidra -i "*touchgfx*" ./sdk           # Only process touchgfx
+  $0 -g /opt/ghidra -i "libfoo*" -i "libbar*" ./libs # Process foo and bar only
+  $0 -g /opt/ghidra -e "*jpeg*" -e "*png*" ./third_party
+  $0 -g /opt/ghidra --include "*core*" --exclude "*test*" ./libs
   $0 --list ./my_sdk/lib
 
 Output Structure:
@@ -242,6 +257,73 @@ check_dependencies() {
 scan_archives() {
     local dir="$1"
     find "$dir" -name "*.a" -type f 2>/dev/null | sort
+}
+
+# Check if archive should be excluded based on patterns
+should_exclude() {
+    local archive="$1"
+    local basename=$(basename "$archive")
+    
+    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+        # Use bash pattern matching
+        if [[ "$basename" == $pattern ]]; then
+            return 0  # Should exclude
+        fi
+    done
+    return 1  # Should not exclude
+}
+
+# Check if archive matches include patterns
+matches_include() {
+    local archive="$1"
+    local basename=$(basename "$archive")
+    
+    # If no include patterns, everything matches
+    if [ ${#INCLUDE_PATTERNS[@]} -eq 0 ]; then
+        return 0
+    fi
+    
+    for pattern in "${INCLUDE_PATTERNS[@]}"; do
+        if [[ "$basename" == $pattern ]]; then
+            return 0  # Matches
+        fi
+    done
+    return 1  # Does not match
+}
+
+# Filter archives based on include/exclude patterns
+filter_archives() {
+    local -n archives_ref=$1
+    local filtered=()
+    local included_count=0
+    local excluded_count=0
+    
+    for archive in "${archives_ref[@]}"; do
+        local basename=$(basename "$archive")
+        
+        # First check include patterns
+        if ! matches_include "$archive"; then
+            log_warn "Skipping (not in include list): $basename"
+            ((excluded_count++))
+            continue
+        fi
+        
+        # Then check exclude patterns
+        if should_exclude "$archive"; then
+            log_warn "Excluding: $basename"
+            ((excluded_count++))
+            continue
+        fi
+        
+        filtered+=("$archive")
+        ((included_count++))
+    done
+    
+    if [ $excluded_count -gt 0 ]; then
+        log_info "Filtered: $included_count included, $excluded_count excluded"
+    fi
+    
+    archives_ref=("${filtered[@]}")
 }
 
 # Find include directory associated with a specific .a file
@@ -354,13 +436,13 @@ decompile_single_object() {
     
     # Run Ghidra headless analysis and decompilation
     "$GHIDRA_HEADLESS" "$temp_project" "temp_project" \
-        -import "$obj_file" \
-        -processor "ARM:LE:32:Cortex" \
-        -cspec "default" \
-        -postScript "$DECOMPILE_SCRIPT" "$output_dir" \
-        -deleteProject \
-        -scriptlog "$log_dir/${obj_name}_script.log" \
-        > "$log_dir/${obj_name}_ghidra.log" 2>&1
+    -import "$obj_file" \
+    -processor "ARM:LE:32:Cortex" \
+    -cspec "default" \
+    -postScript "$DECOMPILE_SCRIPT" "$output_dir" \
+    -deleteProject \
+    -scriptlog "$log_dir/${obj_name}_script.log" \
+    > "$log_dir/${obj_name}_ghidra.log" 2>&1
     
     local status=$?
     
@@ -479,8 +561,8 @@ decompile_library() {
         log_info "Using GNU parallel for multi-threaded processing..."
         
         printf '%s\n' "${obj_files[@]}" | \
-            parallel -j "$PARALLEL_JOBS" --bar --eta \
-            "decompile_worker {} '$lib_output/src' '$lib_output/logs' '$progress_file'"
+        parallel -j "$PARALLEL_JOBS" --bar --eta \
+        "decompile_worker {} '$lib_output/src' '$lib_output/logs' '$progress_file'"
     else
         # Use bash background processes
         log_info "Using bash background processes..."
@@ -643,7 +725,7 @@ ${lib_name}/
 
 ## Source Files
 EOF
-
+    
     echo -e "\n### Decompiled .cpp Files\n" >> "$readme_file"
     
     find "$lib_output/src" -name "*.cpp" -type f | sort | while read f; do
@@ -686,7 +768,7 @@ generate_global_summary() {
 ## Processed Libraries
 
 EOF
-
+    
     # List all processed libraries
     for lib_dir in "$output_dir"/*/; do
         if [ -d "$lib_dir" ]; then
@@ -735,7 +817,7 @@ libsurgeon_output/
 This output is for educational and research purposes only.
 Please respect software licenses and intellectual property rights.
 EOF
-
+    
     log_info "Summary report generated: $summary_file"
 }
 
@@ -756,40 +838,48 @@ main() {
             -g|--ghidra)
                 GHIDRA_PATH="$2"
                 shift 2
-                ;;
+            ;;
             -o|--output)
                 OUTPUT_DIR="$2"
                 shift 2
-                ;;
+            ;;
             -j|--jobs)
                 PARALLEL_JOBS="$2"
                 shift 2
-                ;;
+            ;;
             -j*)
                 PARALLEL_JOBS="${1#-j}"
                 shift
-                ;;
+            ;;
+            -i|--include)
+                INCLUDE_PATTERNS+=("$2")
+                shift 2
+            ;;
+            -e|--exclude)
+                EXCLUDE_PATTERNS+=("$2")
+                shift 2
+            ;;
             -c|--clean)
                 CLEAN_OUTPUT=true
                 shift
-                ;;
+            ;;
             -l|--list)
                 LIST_ONLY=true
                 shift
-                ;;
+            ;;
             -h|--help)
                 show_help
                 exit 0
-                ;;
+            ;;
             -*)
                 log_error "Unknown option: $1"
                 show_help
                 exit 1
-                ;;
+            ;;
             *)
                 TARGET_DIR="$1"
                 shift
-                ;;
+            ;;
         esac
     done
     
@@ -817,7 +907,25 @@ main() {
         exit 1
     fi
     
-    log_info "Found ${#ARCHIVES[@]} archive(s):"
+    log_info "Found ${#ARCHIVES[@]} archive(s)"
+    
+    # Apply include/exclude filters
+    if [ ${#INCLUDE_PATTERNS[@]} -gt 0 ] || [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+        if [ ${#INCLUDE_PATTERNS[@]} -gt 0 ]; then
+            log_info "Include filters: ${INCLUDE_PATTERNS[*]}"
+        fi
+        if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+            log_info "Exclude filters: ${EXCLUDE_PATTERNS[*]}"
+        fi
+        filter_archives ARCHIVES
+    fi
+    
+    if [ ${#ARCHIVES[@]} -eq 0 ]; then
+        log_error "No archives left after filtering"
+        exit 1
+    fi
+    
+    log_info "Archives to process:"
     for archive in "${ARCHIVES[@]}"; do
         echo "  - $(basename "$archive")"
     done
