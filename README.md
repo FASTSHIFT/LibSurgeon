@@ -16,11 +16,11 @@ LibSurgeon is a powerful automated tool that performs surgical extraction of C/C
 
 ### The Decompilation Pipeline
 
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│  .a Archive │ -> │  Extract    │ -> │   Ghidra    │ -> │  .cpp Files │
-│   (input)   │    │  .o files   │    │  Decompile  │    │  (output)   │
-└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+```mermaid
+flowchart LR
+    A["📦 .a Archive<br/>(input)"] --> B["📂 Extract<br/>.o files"]
+    B --> C["🔬 Ghidra<br/>Decompile"]
+    C --> D["📄 .cpp Files<br/>(output)"]
 ```
 
 1. **Archive Extraction**: Uses `ar` to extract individual object files (`.o`) from the static library
