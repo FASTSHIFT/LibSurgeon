@@ -84,6 +84,85 @@ log_step() {
 }
 
 # ============================================================
+# Box Drawing Functions
+# ============================================================
+
+# Draw a box with auto-sized width
+# Usage: draw_box "color" "title" ["subtitle"]
+draw_box() {
+    local color="$1"
+    local title="$2"
+    local subtitle="${3:-}"
+    
+    # Calculate required width (minimum 50, add padding)
+    local title_len=${#title}
+    local subtitle_len=${#subtitle}
+    local max_len=$((title_len > subtitle_len ? title_len : subtitle_len))
+    local width=$((max_len + 6))  # Add padding
+    [ $width -lt 50 ] && width=50
+    [ $width -gt 80 ] && width=80
+    
+    # Generate horizontal line
+    local line=""
+    for ((i=0; i<width; i++)); do
+        line+="═"
+    done
+    
+    echo -e "${color}╔${line}╗${NC}"
+    
+    # Center the title
+    local padding=$(( (width - title_len) / 2 ))
+    local pad_left=""
+    local pad_right=""
+    for ((i=0; i<padding; i++)); do pad_left+=" "; done
+    for ((i=0; i<(width - title_len - padding); i++)); do pad_right+=" "; done
+    echo -e "${color}║${pad_left}${title}${pad_right}║${NC}"
+    
+    # Subtitle if provided
+    if [ -n "$subtitle" ]; then
+        padding=$(( (width - subtitle_len) / 2 ))
+        pad_left=""
+        pad_right=""
+        for ((i=0; i<padding; i++)); do pad_left+=" "; done
+        for ((i=0; i<(width - subtitle_len - padding); i++)); do pad_right+=" "; done
+        echo -e "${color}║${pad_left}${subtitle}${pad_right}║${NC}"
+    fi
+    
+    echo -e "${color}╚${line}╝${NC}"
+}
+
+# Draw a simple section header
+# Usage: draw_section "color" "title"
+draw_section() {
+    local color="$1"
+    local title="$2"
+    
+    # Calculate width based on title
+    local title_len=${#title}
+    local width=$((title_len + 10))
+    [ $width -lt 50 ] && width=50
+    [ $width -gt 80 ] && width=80
+    
+    # Generate line
+    local line=""
+    for ((i=0; i<width; i++)); do
+        line+="─"
+    done
+    
+    echo -e "${color}┌${line}┐${NC}"
+    
+    # Center the title
+    local padding=$(( (width - title_len) / 2 ))
+    local pad_left=""
+    local pad_right=""
+    for ((i=0; i<padding; i++)); do pad_left+=" "; done
+    for ((i=0; i<(width - title_len - padding); i++)); do pad_right+=" "; done
+    echo -e "${color}│${pad_left}${title}${pad_right}│${NC}"
+    
+    echo -e "${color}└${line}┘${NC}"
+}
+
+# ============================================================
 # Progress Display Functions
 # ============================================================
 
@@ -126,9 +205,18 @@ show_progress() {
     local total=$2
     local filename=$3
     local elapsed=$4
-    local eta=$5
+    local eta=${5:-0}
     
-    local percentage=$((current * 100 / total))
+    # Ensure numeric values
+    [[ ! "$current" =~ ^[0-9]+$ ]] && current=0
+    [[ ! "$total" =~ ^[0-9]+$ ]] && total=1
+    [[ ! "$elapsed" =~ ^[0-9]+$ ]] && elapsed=0
+    [[ ! "$eta" =~ ^[0-9]+$ ]] && eta=0
+    
+    local percentage=0
+    if [[ $total -gt 0 ]]; then
+        percentage=$((current * 100 / total))
+    fi
     local bar=$(draw_progress_bar $current $total)
     
     # Clear current line and show progress
@@ -138,7 +226,7 @@ show_progress() {
     echo -ne "${CYAN}[${bar}]${NC} ${BOLD}${percentage}%${NC} (${current}/${total})"
     
     # Time info
-    if [ "$eta" -gt 0 ]; then
+    if [[ $eta -gt 0 ]]; then
         echo -ne " | Elapsed: $(format_time $elapsed) | ETA: ${YELLOW}$(format_time $eta)${NC}"
     else
         echo -ne " | Elapsed: $(format_time $elapsed)"
@@ -147,7 +235,11 @@ show_progress() {
     echo ""
     
     # Current file
-    echo -e "${DIM}  -> Processing: ${NC}${GREEN}${filename}${NC}"
+    if [[ -n "$filename" ]]; then
+        echo -e "${DIM}  -> Completed: ${NC}${GREEN}${filename}${NC}"
+    else
+        echo -e "${DIM}  -> Processing...${NC}"
+    fi
     
     # Move cursor up 2 lines
     echo -ne "\033[2A"
@@ -498,9 +590,7 @@ decompile_library() {
     local lib_output="${output_base}/${lib_name}"
     
     echo ""
-    echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}  Processing: ${BOLD}${lib_name}${NC}"
-    echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
+    draw_box "${BLUE}" "Processing: ${lib_name}"
     
     # Validate archive file
     if [ ! -f "$archive_file" ]; then
@@ -548,9 +638,7 @@ decompile_library() {
     local progress_file=$(mktemp)
     
     echo ""
-    echo -e "${YELLOW}+----------------------------------------------------------------+${NC}"
-    echo -e "${YELLOW}|          Decompilation Progress - ${lib_name} (${PARALLEL_JOBS} threads)${NC}"
-    echo -e "${YELLOW}+----------------------------------------------------------------+${NC}"
+    draw_section "${YELLOW}" "Decompilation Progress - ${lib_name} (${PARALLEL_JOBS} threads)"
     echo ""
     
     # Export required variables
@@ -668,9 +756,7 @@ decompile_library() {
     
     # Display statistics
     echo ""
-    echo -e "${YELLOW}+----------------------------------------------------------------+${NC}"
-    echo -e "${YELLOW}|                    Statistics - ${lib_name}${NC}"
-    echo -e "${YELLOW}+----------------------------------------------------------------+${NC}"
+    draw_section "${YELLOW}" "Statistics - ${lib_name}"
     echo -e "  ${GREEN}Success:${NC} $success_count files"
     if [ $fail_count -gt 0 ]; then
         echo -e "  ${RED}Failed:${NC} $fail_count files (see logs/failed_files.txt)"
