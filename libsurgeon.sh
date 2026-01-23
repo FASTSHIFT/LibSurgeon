@@ -268,7 +268,7 @@ show_help() {
     cat << EOF
 Usage: $0 [options] <target_directory_or_file>
 
-LibSurgeon scans the target directory for static library (.a) files and
+LibSurgeon scans the target directory for static library (.a, .lib) files and
 header files, then decompiles all object files using Ghidra.
 It can also directly process ELF files (.elf, .axf, .out, .o) with intelligent
 module grouping based on function naming conventions.
@@ -298,18 +298,18 @@ Examples:
   # Process static libraries in a directory
   $0 -g /opt/ghidra ./my_sdk/lib
   $0 -g /opt/ghidra -j 8 -o ./output ./vendor/libs
-  
+
   # Process a single ELF file with different module strategies
   $0 -g /opt/ghidra ./firmware.elf                   # Default: prefix grouping
   $0 -g /opt/ghidra -m alpha ./firmware.elf          # Alphabetic grouping
   $0 -g /opt/ghidra -m camelcase ./firmware.axf      # CamelCase word grouping
   $0 -g /opt/ghidra -m single ./app.out              # Single file output
-  
+
   # Filtering examples
   $0 -g /opt/ghidra -i "*touchgfx*" ./sdk           # Only process touchgfx
   $0 -g /opt/ghidra -i "libfoo*" -i "libbar*" ./libs # Process foo and bar only
   $0 -g /opt/ghidra -e "*jpeg*" -e "*png*" ./third_party
-  
+
   # List contents only
   $0 --list ./my_sdk/lib
 
@@ -334,15 +334,15 @@ Module Grouping Strategies for ELF:
   prefix     - Best for libraries with consistent naming (e.g., EwBmp*, GfxCreate*)
                Functions are grouped by their common prefix.
                Example output: firmware_EwBmp.cpp, firmware_EwFnt.cpp
-  
+
   alpha      - Simple A-Z grouping by first letter
                Useful for very large ELF files as a first pass
                Example output: firmware_A.cpp, firmware_B.cpp, ...
-  
+
   camelcase  - Extract meaningful words from CamelCase names
                Good for object-oriented code
                Example output: firmware_EwCreate.cpp, firmware_GfxInit.cpp
-  
+
   single     - All functions in one file
                Use for small ELF files or when module grouping isn't needed
                Example output: firmware_all_functions.cpp
@@ -430,7 +430,7 @@ detect_elf_input() {
             if [ -f "$target" ] && is_elf_file "$target"; then
                 return 0
             fi
-            ;;
+        ;;
     esac
     
     # Check by magic number for files without standard extension
@@ -462,7 +462,7 @@ list_elf_contents() {
     echo -e "${CYAN}Sections:${NC}"
     if command -v readelf &> /dev/null; then
         readelf -S "$elf_file" 2>/dev/null | head -30
-    elif command -v objdump &> /dev/null; then
+        elif command -v objdump &> /dev/null; then
         objdump -h "$elf_file" 2>/dev/null | head -30
     fi
     echo ""
@@ -490,9 +490,9 @@ list_elf_contents() {
     echo -e "${CYAN}Function Prefix Analysis (for module grouping):${NC}"
     if command -v nm &> /dev/null; then
         nm "$elf_file" 2>/dev/null | grep -E " [Tt] " | awk '{print $3}' | \
-            grep -v "^\$" | \
-            sed 's/\([A-Z][a-z]*[A-Z][a-z]*\).*/\1/' | \
-            sort | uniq -c | sort -rn | head -20
+        grep -v "^\$" | \
+        sed 's/\([A-Z][a-z]*[A-Z][a-z]*\).*/\1/' | \
+        sort | uniq -c | sort -rn | head -20
     fi
 }
 
@@ -539,20 +539,76 @@ decompile_elf_file() {
     echo ""
     draw_section "${YELLOW}" "Ghidra Analysis & Decompilation"
     echo ""
-    log_info "Running Ghidra analysis (this may take a while)..."
-    log_info "Progress will be shown when analysis completes."
+    log_info "Running Ghidra analysis..."
     
-    # Run Ghidra headless analysis and decompilation
+    # Create a named pipe for progress tracking
+    local progress_pipe=$(mktemp -u)
+    mkfifo "$progress_pipe"
+    
+    # Run Ghidra in background, output to pipe
     "$GHIDRA_HEADLESS" "$temp_project" "elf_project" \
-        -import "$elf_file" \
-        -processor "ARM:LE:32:Cortex" \
-        -cspec "default" \
-        -postScript "$DECOMPILE_ELF_SCRIPT" "$elf_output/src" "$strategy" \
-        -deleteProject \
-        -scriptlog "$elf_output/logs/ghidra_script.log" \
-        > "$elf_output/logs/ghidra_main.log" 2>&1
+    -import "$elf_file" \
+    -processor "ARM:LE:32:Cortex" \
+    -cspec "default" \
+    -postScript "$DECOMPILE_ELF_SCRIPT" "$elf_output/src" "$strategy" \
+    -deleteProject \
+    -scriptlog "$elf_output/logs/ghidra_script.log" \
+    2>&1 | tee "$elf_output/logs/ghidra_main.log" > "$progress_pipe" &
     
+    local ghidra_pid=$!
+    
+    # Parse progress from Ghidra output
+    local total=0
+    local current=0
+    local last_func=""
+    local analysis_done=false
+    
+    while IFS= read -r line; do
+        # Check for total count
+        if [[ "$line" == *"[PROGRESS_TOTAL]"* ]]; then
+            total=$(echo "$line" | sed 's/.*\[PROGRESS_TOTAL\] //')
+            analysis_done=true
+            echo ""
+            draw_section "${CYAN}" "Decompilation Progress (${total} functions)"
+            echo ""
+            # Check for progress update
+            elif [[ "$line" == *"[PROGRESS]"* ]]; then
+            # Parse: [PROGRESS] current/total func_name
+            local progress_info=$(echo "$line" | sed 's/.*\[PROGRESS\] //')
+            current=$(echo "$progress_info" | cut -d'/' -f1)
+            local func_name=$(echo "$progress_info" | cut -d' ' -f2-)
+            
+            if [[ $total -gt 0 ]]; then
+                local now=$(date +%s)
+                local elapsed=$((now - start_time))
+                local eta=0
+                if [[ $current -gt 0 ]]; then
+                    local avg=$((elapsed * 1000 / current))
+                    eta=$(((total - current) * avg / 1000))
+                fi
+                show_progress $current $total "$func_name" $elapsed $eta
+            fi
+            # Show analysis phase
+            elif [[ "$line" == *"INFO  ANALYZING"* ]] || [[ "$line" == *"Analyzing..."* ]]; then
+            if [[ "$analysis_done" == false ]]; then
+                echo -ne "\r\033[K${DIM}  Ghidra analyzing...${NC}"
+            fi
+        fi
+    done < "$progress_pipe"
+    
+    # Wait for Ghidra to complete
+    wait $ghidra_pid
     local status=$?
+    
+    # Cleanup pipe
+    rm -f "$progress_pipe"
+    
+    # Show final progress
+    if [[ $total -gt 0 ]]; then
+        local end_time=$(date +%s)
+        local total_elapsed=$((end_time - start_time))
+        show_progress_final $total $total_elapsed
+    fi
     
     # Cleanup temp project
     rm -rf "$temp_project"
@@ -588,13 +644,16 @@ decompile_elf_file() {
     echo -e "     - Total lines: $total_lines"
     echo ""
     
-    # List generated files
-    echo -e "  ${CYAN}Generated Modules:${NC}"
-    find "$elf_output/src" -name "*.cpp" -type f | sort | while read f; do
-        local fname=$(basename "$f")
-        local lines=$(wc -l < "$f")
-        echo "     - $fname ($lines lines)"
+    # List generated files (top 10 by size)
+    echo -e "  ${CYAN}Generated Modules (top 10 by size):${NC}"
+    find "$elf_output/src" -name "*.cpp" -type f -exec wc -l {} + 2>/dev/null | \
+    grep -v "total$" | sort -rn | head -10 | while read lines fname; do
+        local basename_f=$(basename "$fname")
+        echo "     - $basename_f ($lines lines)"
     done
+    if [[ $cpp_count -gt 10 ]]; then
+        echo -e "     ${DIM}... and $((cpp_count - 10)) more modules${NC}"
+    fi
     echo ""
     
     # Generate ELF-specific README
@@ -625,7 +684,7 @@ generate_elf_readme() {
 ## Module Grouping Strategy: ${strategy}
 
 EOF
-
+    
     case "$strategy" in
         prefix)
             cat >> "$readme_file" << 'EOF'
@@ -635,7 +694,7 @@ with consistent naming conventions like:
 - EwFnt* (Font functions) -> elf_name_EwFnt.cpp
 - GfxCreate* (Graphics creation) -> elf_name_GfxCreate.cpp
 EOF
-            ;;
+        ;;
         alpha)
             cat >> "$readme_file" << 'EOF'
 Functions are grouped alphabetically (A-Z). This is useful for very large
@@ -643,29 +702,29 @@ ELF files as a first-pass organization:
 - A* functions -> elf_name_A.cpp
 - B* functions -> elf_name_B.cpp
 EOF
-            ;;
+        ;;
         camelcase)
             cat >> "$readme_file" << 'EOF'
 Functions are grouped by extracting CamelCase words from their names:
 - EwCreateBitmap, EwCreateSurface -> elf_name_EwCreate.cpp
 - GfxInitViewport, GfxInitGfx -> elf_name_GfxInit.cpp
 EOF
-            ;;
+        ;;
         single)
             cat >> "$readme_file" << 'EOF'
 All functions are placed in a single output file. Useful for small ELF files
 or when no grouping is desired.
 EOF
-            ;;
+        ;;
     esac
-
+    
     cat >> "$readme_file" << EOF
 
 ## Directory Structure
 \`\`\`
 ${elf_name}/
 ├── src/              # Decompiled source code (grouped by module)
-├── logs/             # Ghidra processing logs  
+├── logs/             # Ghidra processing logs
 ├── ${elf_name}_INDEX.md  # Complete function index
 └── README.md         # This file
 \`\`\`
@@ -693,7 +752,7 @@ EOF
 ## Understanding the Output
 
 - Function addresses are preserved in comments for cross-referencing
-- Mangled C++ names (if any) are shown alongside demangled versions  
+- Mangled C++ names (if any) are shown alongside demangled versions
 - Auto-generated variable names (param_1, local_10) are from Ghidra analysis
 
 ## Disclaimer
@@ -705,10 +764,10 @@ EOF
 EOF
 }
 
-# Scan directory for .a files
+# Scan directory for .a and .lib files
 scan_archives() {
     local dir="$1"
-    find "$dir" -name "*.a" -type f 2>/dev/null | sort
+    find "$dir" \( -name "*.a" -o -name "*.lib" \) -type f 2>/dev/null | sort
 }
 
 # Check if archive should be excluded based on patterns
@@ -1339,12 +1398,12 @@ main() {
     case "$MODULE_STRATEGY" in
         prefix|alpha|camelcase|single)
             # Valid strategy
-            ;;
+        ;;
         *)
             log_error "Invalid module strategy: $MODULE_STRATEGY"
             log_error "Valid strategies: prefix, alpha, camelcase, single"
             exit 1
-            ;;
+        ;;
     esac
     
     # Validate target
@@ -1359,18 +1418,18 @@ main() {
         ELF_MODE=true
         ELF_FILE=$(realpath "$TARGET_DIR")
         log_info "Detected ELF file input: $ELF_FILE"
-    elif [ -f "$TARGET_DIR" ]; then
-        # It's a file but not ELF - check if it's a .a archive
-        if [[ "$TARGET_DIR" == *.a ]]; then
-            # Single .a file - treat as directory containing just this file
+        elif [ -f "$TARGET_DIR" ]; then
+        # It's a file but not ELF - check if it's a .a or .lib archive
+        if [[ "$TARGET_DIR" == *.a ]] || [[ "$TARGET_DIR" == *.lib ]]; then
+            # Single archive file - treat as directory containing just this file
             TARGET_DIR=$(realpath "$TARGET_DIR")
             log_info "Single archive file: $TARGET_DIR"
         else
             log_error "Unsupported file type: $TARGET_DIR"
-            log_error "Supported: .a (archive), .elf, .axf, .out (ELF files)"
+            log_error "Supported: .a, .lib (archive), .elf, .axf, .out (ELF files)"
             exit 1
         fi
-    elif [ ! -d "$TARGET_DIR" ]; then
+        elif [ ! -d "$TARGET_DIR" ]; then
         log_error "Target does not exist: $TARGET_DIR"
         exit 1
     else
@@ -1435,7 +1494,7 @@ main() {
     mapfile -t ARCHIVES < <(scan_archives "$TARGET_DIR")
     
     if [ ${#ARCHIVES[@]} -eq 0 ]; then
-        log_error "No .a archive files found in $TARGET_DIR"
+        log_error "No .a or .lib archive files found in $TARGET_DIR"
         exit 1
     fi
     
@@ -1491,7 +1550,10 @@ main() {
     
     # Process each archive
     for archive in "${ARCHIVES[@]}"; do
-        local lib_name=$(basename "$archive" .a)
+        # Remove both .a and .lib extensions
+        local lib_name=$(basename "$archive")
+        lib_name="${lib_name%.a}"
+        lib_name="${lib_name%.lib}"
         lib_name=${lib_name#lib}  # Remove lib prefix
         
         # Handle duplicate library names

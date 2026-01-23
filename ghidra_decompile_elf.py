@@ -335,19 +335,32 @@ def main():
     # Decompile and write each module
     print("\n[Info] Decompiling modules...")
 
+    # Output progress header for shell script to parse
+    print("[PROGRESS_TOTAL] {}".format(func_count))
+
     total_decompiled = 0
     total_failed = 0
+    current_func = 0
+    module_index = 0
+    total_modules = len(module_functions)
 
     for module_name in sorted(module_functions.keys()):
         funcs = module_functions[module_name]
+        module_index += 1
 
         # Create output filename - just use module name, no ELF prefix!
         safe_module_name = sanitize_filename(module_name)
         output_file = os.path.join(output_dir, "{}.cpp".format(safe_module_name))
 
-        print(
-            "\n  Processing module: {} ({} functions)".format(module_name, len(funcs))
-        )
+        # Only print module info for first 5 and last one, or if total <= 10
+        if total_modules <= 10 or module_index <= 5 or module_index == total_modules:
+            print(
+                "\n  [{}/{}] Processing module: {} ({} functions)".format(
+                    module_index, total_modules, module_name, len(funcs)
+                )
+            )
+        elif module_index == 6:
+            print("\n  ... processing {} more modules ...".format(total_modules - 6))
 
         module_decompiled = 0
         module_failed = 0
@@ -361,6 +374,14 @@ def main():
             for func, display_name, mangled_name in sorted_funcs:
                 if monitor.isCancelled():
                     break
+
+                current_func += 1
+                # Output progress for shell script to parse
+                print(
+                    "[PROGRESS] {}/{} {}".format(
+                        current_func, func_count, display_name[:50]
+                    )
+                )
 
                 decompiled = get_decompiled_function(decomp_ifc, func, monitor)
 
@@ -389,11 +410,13 @@ def main():
                     )
                     module_failed += 1
 
-        print(
-            "    -> {}.cpp: {} OK, {} failed".format(
-                safe_module_name, module_decompiled, module_failed
+        # Only print result for first 5 and last one, or if total <= 10
+        if total_modules <= 10 or module_index <= 5 or module_index == total_modules:
+            print(
+                "    -> {}.cpp: {} OK, {} failed".format(
+                    safe_module_name, module_decompiled, module_failed
+                )
             )
-        )
 
         total_decompiled += module_decompiled
         total_failed += module_failed
