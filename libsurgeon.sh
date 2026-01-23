@@ -526,7 +526,7 @@ decompile_elf_file() {
     log_info "Module Strategy: $strategy"
     
     # Create output directories
-    mkdir -p "$elf_output/src"
+    mkdir -p "$elf_output"
     mkdir -p "$elf_output/logs"
     
     # Time tracking
@@ -546,11 +546,12 @@ decompile_elf_file() {
     mkfifo "$progress_pipe"
     
     # Run Ghidra in background, output to pipe
+    # Python script will create src/ and include/ subdirectories
     "$GHIDRA_HEADLESS" "$temp_project" "elf_project" \
     -import "$elf_file" \
     -processor "ARM:LE:32:Cortex" \
     -cspec "default" \
-    -postScript "$DECOMPILE_ELF_SCRIPT" "$elf_output/src" "$strategy" \
+    -postScript "$DECOMPILE_ELF_SCRIPT" "$elf_output" "$strategy" \
     -deleteProject \
     -scriptlog "$elf_output/logs/ghidra_script.log" \
     2>&1 | tee "$elf_output/logs/ghidra_main.log" > "$progress_pipe" &
@@ -625,13 +626,14 @@ decompile_elf_file() {
         return 1
     fi
     
-    # Move index file if generated (now named _INDEX.md)
-    if [ -f "$elf_output/src/_INDEX.md" ]; then
-        mv "$elf_output/src/_INDEX.md" "$elf_output/"
+    # Move index file if generated (Python script puts it in output_dir, not src)
+    if [ -f "$elf_output/_INDEX.md" ]; then
+        log_info "Index file already in correct location"
     fi
     
     # Statistics
     local cpp_count=$(find "$elf_output/src" -name "*.cpp" 2>/dev/null | wc -l)
+    local h_count=$(find "$elf_output/include" -name "*.h" 2>/dev/null | wc -l)
     local total_lines=$(find "$elf_output/src" -name "*.cpp" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}')
     [[ -z "$total_lines" ]] && total_lines=0
     
@@ -640,7 +642,8 @@ decompile_elf_file() {
     echo -e "  ${GREEN}Status:${NC} Success"
     echo -e "  ${BLUE}Duration:${NC} $(format_time $total_elapsed)"
     echo -e "  ${CYAN}Output Files:${NC}"
-    echo -e "     - Module files: $cpp_count .cpp files"
+    echo -e "     - Source files: $cpp_count .cpp files (in src/)"
+    echo -e "     - Header files: $h_count .h files (in include/)"
     echo -e "     - Total lines: $total_lines"
     echo ""
     
@@ -723,22 +726,33 @@ EOF
 ## Directory Structure
 \`\`\`
 ${elf_name}/
-├── src/              # Decompiled source code (grouped by module)
+├── src/              # Decompiled source code (.cpp files)
+├── include/          # Header files (.h files)
+│   ├── _types.h      # Type definitions (structures, enums, typedefs)
+│   └── _all_headers.h # Master header including all module headers
 ├── logs/             # Ghidra processing logs
-├── ${elf_name}_INDEX.md  # Complete function index
+├── _INDEX.md         # Complete function index
 └── README.md         # This file
 \`\`\`
 
 ## Source Files
 EOF
     
-    echo -e "\n### Decompiled Modules\n" >> "$readme_file"
+    echo -e "\n### Decompiled Modules (src/)\n" >> "$readme_file"
     
     find "$elf_output/src" -name "*.cpp" -type f | sort | while read f; do
         local fname=$(basename "$f")
         local lines=$(wc -l < "$f")
         local funcs=$(grep -c "^// Function:" "$f" 2>/dev/null || echo 0)
         echo "- \`$fname\` - $funcs functions ($lines lines)" >> "$readme_file"
+    done
+    
+    echo -e "\n### Header Files (include/)\n" >> "$readme_file"
+    
+    find "$elf_output/include" -name "*.h" -type f | sort | while read f; do
+        local fname=$(basename "$f")
+        local lines=$(wc -l < "$f")
+        echo "- \`$fname\` ($lines lines)" >> "$readme_file"
     done
     
     cat >> "$readme_file" << 'EOF'
