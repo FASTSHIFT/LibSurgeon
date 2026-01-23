@@ -1,16 +1,17 @@
 #!/bin/bash
 # -*- coding: utf-8 -*-
 #
-# LibSurgeon - Static Library Reverse Engineering Tool
-# Automated decompilation of .a archive files to C/C++ source code
+# LibSurgeon - Static Library & ELF Reverse Engineering Tool
+# Automated decompilation of .a archive and ELF files to C/C++ source code
 #
 # Usage:
-#   ./libsurgeon.sh [options] <target_directory>
+#   ./libsurgeon.sh [options] <target_directory_or_file>
 #
 # Options:
 #   -g, --ghidra <path>     Path to Ghidra installation (required)
 #   -o, --output <dir>      Output directory (default: ./libsurgeon_output)
 #   -j, --jobs <num>        Number of parallel jobs (default: auto)
+#   -m, --module <strategy> Module grouping strategy for ELF: prefix|alpha|camelcase|single
 #   -c, --clean             Clean previous output
 #   -l, --list              List archive contents only
 #   -h, --help              Show help message
@@ -41,6 +42,11 @@ TARGET_DIR=""
 CLEAN_OUTPUT=false
 LIST_ONLY=false
 
+# ELF mode configuration
+ELF_MODE=false
+ELF_FILE=""
+MODULE_STRATEGY="prefix"  # prefix|alpha|camelcase|single
+
 # Filter patterns (arrays of glob patterns)
 declare -a EXCLUDE_PATTERNS=()
 declare -a INCLUDE_PATTERNS=()
@@ -53,6 +59,7 @@ PARALLEL_JOBS=$(( ($(nproc) + 1) / 2 ))
 # Ghidra related
 GHIDRA_HEADLESS=""
 DECOMPILE_SCRIPT="${SCRIPT_DIR}/ghidra_decompile.py"
+DECOMPILE_ELF_SCRIPT="${SCRIPT_DIR}/ghidra_decompile_elf.py"
 
 # ============================================================
 # Function Definitions
@@ -259,49 +266,93 @@ show_progress_final() {
 
 show_help() {
     cat << EOF
-Usage: $0 [options] <target_directory>
+Usage: $0 [options] <target_directory_or_file>
 
 LibSurgeon scans the target directory for static library (.a) files and
 header files, then decompiles all object files using Ghidra.
+It can also directly process ELF files (.elf, .axf, .out, .o) with intelligent
+module grouping based on function naming conventions.
 
 Options:
   -g, --ghidra <path>     Path to Ghidra installation (REQUIRED)
   -o, --output <dir>      Output directory (default: ./libsurgeon_output)
   -j, --jobs <num>        Number of parallel jobs (default: $PARALLEL_JOBS)
+  -m, --module <strategy> Module grouping strategy for ELF files:
+                            prefix    - Group by function prefix (EwBmp*, EwFnt*) [default]
+                            alpha     - Group by first letter (A-Z)
+                            camelcase - Group by CamelCase words
+                            single    - All functions in one file
   -i, --include <pattern> Only include archives matching pattern (can be used multiple times)
   -e, --exclude <pattern> Exclude archives matching pattern (can be used multiple times)
   -c, --clean             Clean previous output before processing
   -l, --list              List archive contents without decompiling
   -h, --help              Show this help message
 
-Filter Rules:
+Filter Rules (for .a archives):
   - If --include is specified, only matching archives are processed
   - If --exclude is specified, matching archives are skipped
   - --include is applied first, then --exclude
   - Patterns support wildcards: * (any chars), ? (single char), [abc] (char set)
 
 Examples:
+  # Process static libraries in a directory
   $0 -g /opt/ghidra ./my_sdk/lib
   $0 -g /opt/ghidra -j 8 -o ./output ./vendor/libs
+  
+  # Process a single ELF file with different module strategies
+  $0 -g /opt/ghidra ./firmware.elf                   # Default: prefix grouping
+  $0 -g /opt/ghidra -m alpha ./firmware.elf          # Alphabetic grouping
+  $0 -g /opt/ghidra -m camelcase ./firmware.axf      # CamelCase word grouping
+  $0 -g /opt/ghidra -m single ./app.out              # Single file output
+  
+  # Filtering examples
   $0 -g /opt/ghidra -i "*touchgfx*" ./sdk           # Only process touchgfx
   $0 -g /opt/ghidra -i "libfoo*" -i "libbar*" ./libs # Process foo and bar only
   $0 -g /opt/ghidra -e "*jpeg*" -e "*png*" ./third_party
-  $0 -g /opt/ghidra --include "*core*" --exclude "*test*" ./libs
+  
+  # List contents only
   $0 --list ./my_sdk/lib
 
 Output Structure:
-  libsurgeon_output/
-  ├── <library_name>/
-  │   ├── src/           # Decompiled C/C++ source files
-  │   ├── include/       # Copied header files (if found)
-  │   └── logs/          # Ghidra processing logs
-  └── SUMMARY.md         # Overview report
+  For .a archives:
+    libsurgeon_output/
+    ├── <library_name>/
+    │   ├── src/           # Decompiled C/C++ source files (one per .o)
+    │   ├── include/       # Copied header files (if found)
+    │   └── logs/          # Ghidra processing logs
+    └── SUMMARY.md         # Overview report
+
+  For ELF files:
+    libsurgeon_output/
+    ├── <elf_name>/
+    │   ├── src/           # Decompiled C/C++ source files (grouped by module)
+    │   ├── logs/          # Ghidra processing logs
+    │   └── <elf_name>_INDEX.md  # Function index
+    └── SUMMARY.md         # Overview report
+
+Module Grouping Strategies for ELF:
+  prefix     - Best for libraries with consistent naming (e.g., EwBmp*, GfxCreate*)
+               Functions are grouped by their common prefix.
+               Example output: firmware_EwBmp.cpp, firmware_EwFnt.cpp
+  
+  alpha      - Simple A-Z grouping by first letter
+               Useful for very large ELF files as a first pass
+               Example output: firmware_A.cpp, firmware_B.cpp, ...
+  
+  camelcase  - Extract meaningful words from CamelCase names
+               Good for object-oriented code
+               Example output: firmware_EwCreate.cpp, firmware_GfxInit.cpp
+  
+  single     - All functions in one file
+               Use for small ELF files or when module grouping isn't needed
+               Example output: firmware_all_functions.cpp
 
 Notes:
   - Ghidra 11+ with Java 17+ is required
   - ARM Cortex-M processor is assumed (can be modified in script)
   - Original symbols are preserved if not stripped
-  - Each .o file produces one .cpp file
+  - For .a files: Each .o file produces one .cpp file
+  - For ELF files: Functions are grouped by the selected strategy
 
 EOF
 }
@@ -342,7 +393,316 @@ check_dependencies() {
         exit 1
     fi
     
+    if [ ! -f "$DECOMPILE_ELF_SCRIPT" ]; then
+        log_error "ELF decompile script not found: $DECOMPILE_ELF_SCRIPT"
+        exit 1
+    fi
+    
     log_info "Dependencies check passed"
+}
+
+# ============================================================
+# ELF File Detection and Processing
+# ============================================================
+
+# Check if a file is an ELF file
+is_elf_file() {
+    local file="$1"
+    if [ ! -f "$file" ]; then
+        return 1
+    fi
+    
+    # Check ELF magic number
+    local magic=$(head -c 4 "$file" 2>/dev/null | od -A n -t x1 | tr -d ' ')
+    if [[ "$magic" == "7f454c46" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Check if target is an ELF file (by extension or magic)
+detect_elf_input() {
+    local target="$1"
+    
+    # Check by extension first
+    case "$target" in
+        *.elf|*.ELF|*.axf|*.AXF|*.out|*.bin)
+            if [ -f "$target" ] && is_elf_file "$target"; then
+                return 0
+            fi
+            ;;
+    esac
+    
+    # Check by magic number for files without standard extension
+    if [ -f "$target" ] && is_elf_file "$target"; then
+        return 0
+    fi
+    
+    return 1
+}
+
+# List symbols in an ELF file
+list_elf_contents() {
+    local elf_file="$1"
+    
+    echo -e "\n${BLUE}=== ELF File Information ===${NC}"
+    echo -e "File: $elf_file\n"
+    
+    # Basic file info
+    echo -e "${CYAN}File Type:${NC}"
+    file "$elf_file"
+    echo ""
+    
+    # Size info
+    local size=$(stat -c%s "$elf_file" 2>/dev/null || stat -f%z "$elf_file" 2>/dev/null)
+    echo -e "${CYAN}File Size:${NC} $((size / 1024)) KB"
+    echo ""
+    
+    # Section headers
+    echo -e "${CYAN}Sections:${NC}"
+    if command -v readelf &> /dev/null; then
+        readelf -S "$elf_file" 2>/dev/null | head -30
+    elif command -v objdump &> /dev/null; then
+        objdump -h "$elf_file" 2>/dev/null | head -30
+    fi
+    echo ""
+    
+    # Symbol count
+    echo -e "${CYAN}Symbol Summary:${NC}"
+    if command -v nm &> /dev/null; then
+        local total=$(nm "$elf_file" 2>/dev/null | wc -l)
+        local funcs=$(nm "$elf_file" 2>/dev/null | grep -E " [Tt] " | wc -l)
+        local data=$(nm "$elf_file" 2>/dev/null | grep -E " [DdBbRr] " | wc -l)
+        echo "  - Total symbols: $total"
+        echo "  - Functions (T/t): $funcs"
+        echo "  - Data (D/d/B/b/R/r): $data"
+    fi
+    echo ""
+    
+    # Function name preview
+    echo -e "${CYAN}Function Names (first 30):${NC}"
+    if command -v nm &> /dev/null; then
+        nm "$elf_file" 2>/dev/null | grep -E " [Tt] " | awk '{print $3}' | head -30 | nl
+    fi
+    echo ""
+    
+    # Prefix analysis
+    echo -e "${CYAN}Function Prefix Analysis (for module grouping):${NC}"
+    if command -v nm &> /dev/null; then
+        nm "$elf_file" 2>/dev/null | grep -E " [Tt] " | awk '{print $3}' | \
+            grep -v "^\$" | \
+            sed 's/\([A-Z][a-z]*[A-Z][a-z]*\).*/\1/' | \
+            sort | uniq -c | sort -rn | head -20
+    fi
+}
+
+# Process a single ELF file
+decompile_elf_file() {
+    local elf_file="$1"
+    local output_base="$2"
+    local strategy="$3"
+    
+    local elf_name=$(basename "$elf_file")
+    elf_name="${elf_name%.*}"  # Remove extension
+    
+    local elf_output="${output_base}/${elf_name}"
+    
+    echo ""
+    draw_box "${BLUE}" "Processing ELF: ${elf_name}" "Strategy: ${strategy}"
+    
+    # Validate ELF file
+    if [ ! -f "$elf_file" ]; then
+        log_error "ELF file not found: $elf_file"
+        return 1
+    fi
+    
+    if ! is_elf_file "$elf_file"; then
+        log_error "Not a valid ELF file: $elf_file"
+        return 1
+    fi
+    
+    log_info "ELF File: $elf_file"
+    log_info "Output: $elf_output"
+    log_info "Module Strategy: $strategy"
+    
+    # Create output directories
+    mkdir -p "$elf_output/src"
+    mkdir -p "$elf_output/logs"
+    
+    # Time tracking
+    local start_time=$(date +%s)
+    
+    # Create temp Ghidra project
+    local temp_project="/tmp/libsurgeon_elf_$$_$RANDOM"
+    mkdir -p "$temp_project"
+    
+    echo ""
+    draw_section "${YELLOW}" "Ghidra Analysis & Decompilation"
+    echo ""
+    log_info "Running Ghidra analysis (this may take a while)..."
+    log_info "Progress will be shown when analysis completes."
+    
+    # Run Ghidra headless analysis and decompilation
+    "$GHIDRA_HEADLESS" "$temp_project" "elf_project" \
+        -import "$elf_file" \
+        -processor "ARM:LE:32:Cortex" \
+        -cspec "default" \
+        -postScript "$DECOMPILE_ELF_SCRIPT" "$elf_output/src" "$strategy" \
+        -deleteProject \
+        -scriptlog "$elf_output/logs/ghidra_script.log" \
+        > "$elf_output/logs/ghidra_main.log" 2>&1
+    
+    local status=$?
+    
+    # Cleanup temp project
+    rm -rf "$temp_project"
+    
+    local end_time=$(date +%s)
+    local total_elapsed=$((end_time - start_time))
+    
+    # Check results
+    if [[ $status -ne 0 ]]; then
+        log_error "Ghidra processing failed. Check logs at: $elf_output/logs/"
+        echo ""
+        echo "Last 20 lines of log:"
+        tail -20 "$elf_output/logs/ghidra_main.log"
+        return 1
+    fi
+    
+    # Move index file if generated (now named _INDEX.md)
+    if [ -f "$elf_output/src/_INDEX.md" ]; then
+        mv "$elf_output/src/_INDEX.md" "$elf_output/"
+    fi
+    
+    # Statistics
+    local cpp_count=$(find "$elf_output/src" -name "*.cpp" 2>/dev/null | wc -l)
+    local total_lines=$(find "$elf_output/src" -name "*.cpp" -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}')
+    [[ -z "$total_lines" ]] && total_lines=0
+    
+    echo ""
+    draw_section "${GREEN}" "ELF Processing Complete - ${elf_name}"
+    echo -e "  ${GREEN}Status:${NC} Success"
+    echo -e "  ${BLUE}Duration:${NC} $(format_time $total_elapsed)"
+    echo -e "  ${CYAN}Output Files:${NC}"
+    echo -e "     - Module files: $cpp_count .cpp files"
+    echo -e "     - Total lines: $total_lines"
+    echo ""
+    
+    # List generated files
+    echo -e "  ${CYAN}Generated Modules:${NC}"
+    find "$elf_output/src" -name "*.cpp" -type f | sort | while read f; do
+        local fname=$(basename "$f")
+        local lines=$(wc -l < "$f")
+        echo "     - $fname ($lines lines)"
+    done
+    echo ""
+    
+    # Generate ELF-specific README
+    generate_elf_readme "$elf_name" "$elf_output" "$strategy" "$cpp_count" "$total_elapsed"
+    
+    return 0
+}
+
+generate_elf_readme() {
+    local elf_name="$1"
+    local elf_output="$2"
+    local strategy="$3"
+    local module_count="$4"
+    local elapsed="$5"
+    
+    local readme_file="$elf_output/README.md"
+    
+    cat > "$readme_file" << EOF
+# ${elf_name} - Decompiled ELF Output
+
+## Overview
+- Source: ${elf_name}.elf
+- Generated: $(date '+%Y-%m-%d %H:%M:%S')
+- Module Strategy: ${strategy}
+- Output Modules: ${module_count}
+- Processing time: $(format_time $elapsed)
+
+## Module Grouping Strategy: ${strategy}
+
+EOF
+
+    case "$strategy" in
+        prefix)
+            cat >> "$readme_file" << 'EOF'
+Functions are grouped by their naming prefix. This works best for libraries
+with consistent naming conventions like:
+- EwBmp* (Bitmap functions) -> elf_name_EwBmp.cpp
+- EwFnt* (Font functions) -> elf_name_EwFnt.cpp
+- GfxCreate* (Graphics creation) -> elf_name_GfxCreate.cpp
+EOF
+            ;;
+        alpha)
+            cat >> "$readme_file" << 'EOF'
+Functions are grouped alphabetically (A-Z). This is useful for very large
+ELF files as a first-pass organization:
+- A* functions -> elf_name_A.cpp
+- B* functions -> elf_name_B.cpp
+EOF
+            ;;
+        camelcase)
+            cat >> "$readme_file" << 'EOF'
+Functions are grouped by extracting CamelCase words from their names:
+- EwCreateBitmap, EwCreateSurface -> elf_name_EwCreate.cpp
+- GfxInitViewport, GfxInitGfx -> elf_name_GfxInit.cpp
+EOF
+            ;;
+        single)
+            cat >> "$readme_file" << 'EOF'
+All functions are placed in a single output file. Useful for small ELF files
+or when no grouping is desired.
+EOF
+            ;;
+    esac
+
+    cat >> "$readme_file" << EOF
+
+## Directory Structure
+\`\`\`
+${elf_name}/
+├── src/              # Decompiled source code (grouped by module)
+├── logs/             # Ghidra processing logs  
+├── ${elf_name}_INDEX.md  # Complete function index
+└── README.md         # This file
+\`\`\`
+
+## Source Files
+EOF
+    
+    echo -e "\n### Decompiled Modules\n" >> "$readme_file"
+    
+    find "$elf_output/src" -name "*.cpp" -type f | sort | while read f; do
+        local fname=$(basename "$f")
+        local lines=$(wc -l < "$f")
+        local funcs=$(grep -c "^// Function:" "$f" 2>/dev/null || echo 0)
+        echo "- \`$fname\` - $funcs functions ($lines lines)" >> "$readme_file"
+    done
+    
+    cat >> "$readme_file" << 'EOF'
+
+## Usage Notes
+
+1. **Module Organization**: Each .cpp file contains related functions based on the grouping strategy
+2. **Index File**: See the *_INDEX.md file for a complete function listing with addresses
+3. **Check Logs**: The logs/ directory contains Ghidra processing logs for troubleshooting
+
+## Understanding the Output
+
+- Function addresses are preserved in comments for cross-referencing
+- Mangled C++ names (if any) are shown alongside demangled versions  
+- Auto-generated variable names (param_1, local_10) are from Ghidra analysis
+
+## Disclaimer
+
+- Decompiled code is for educational and research purposes only
+- Variable and some function names are auto-inferred by Ghidra
+- Code may not compile directly without modifications
+- Please respect software licenses and intellectual property rights
+EOF
 }
 
 # Scan directory for .a files
@@ -939,6 +1299,10 @@ main() {
                 PARALLEL_JOBS="${1#-j}"
                 shift
             ;;
+            -m|--module)
+                MODULE_STRATEGY="$2"
+                shift 2
+            ;;
             -i|--include)
                 INCLUDE_PATTERNS+=("$2")
                 shift 2
@@ -971,19 +1335,99 @@ main() {
         esac
     done
     
-    # Validate target directory
+    # Validate module strategy
+    case "$MODULE_STRATEGY" in
+        prefix|alpha|camelcase|single)
+            # Valid strategy
+            ;;
+        *)
+            log_error "Invalid module strategy: $MODULE_STRATEGY"
+            log_error "Valid strategies: prefix, alpha, camelcase, single"
+            exit 1
+            ;;
+    esac
+    
+    # Validate target
     if [ -z "$TARGET_DIR" ]; then
-        log_error "Target directory not specified."
+        log_error "Target directory or file not specified."
         show_help
         exit 1
     fi
     
-    if [ ! -d "$TARGET_DIR" ]; then
-        log_error "Target directory does not exist: $TARGET_DIR"
+    # Check if target is an ELF file
+    if detect_elf_input "$TARGET_DIR"; then
+        ELF_MODE=true
+        ELF_FILE=$(realpath "$TARGET_DIR")
+        log_info "Detected ELF file input: $ELF_FILE"
+    elif [ -f "$TARGET_DIR" ]; then
+        # It's a file but not ELF - check if it's a .a archive
+        if [[ "$TARGET_DIR" == *.a ]]; then
+            # Single .a file - treat as directory containing just this file
+            TARGET_DIR=$(realpath "$TARGET_DIR")
+            log_info "Single archive file: $TARGET_DIR"
+        else
+            log_error "Unsupported file type: $TARGET_DIR"
+            log_error "Supported: .a (archive), .elf, .axf, .out (ELF files)"
+            exit 1
+        fi
+    elif [ ! -d "$TARGET_DIR" ]; then
+        log_error "Target does not exist: $TARGET_DIR"
         exit 1
+    else
+        TARGET_DIR=$(realpath "$TARGET_DIR")
     fi
     
-    TARGET_DIR=$(realpath "$TARGET_DIR")
+    # ============================================================
+    # ELF Mode Processing
+    # ============================================================
+    if [ "$ELF_MODE" = true ]; then
+        # List only mode for ELF
+        if [ "$LIST_ONLY" = true ]; then
+            list_elf_contents "$ELF_FILE"
+            exit 0
+        fi
+        
+        # Check dependencies
+        check_dependencies
+        
+        # Clean output
+        if [ "$CLEAN_OUTPUT" = true ] && [ -d "$OUTPUT_DIR" ]; then
+            log_warn "Cleaning output directory: $OUTPUT_DIR"
+            rm -rf "$OUTPUT_DIR"
+        fi
+        
+        # Create output directory
+        mkdir -p "$OUTPUT_DIR"
+        OUTPUT_DIR=$(realpath "$OUTPUT_DIR")
+        
+        # Setup cleanup trap
+        trap "cleanup" EXIT
+        
+        # Process ELF file
+        decompile_elf_file "$ELF_FILE" "$OUTPUT_DIR" "$MODULE_STRATEGY"
+        
+        # Generate global summary
+        generate_global_summary "$OUTPUT_DIR"
+        
+        # Done
+        echo ""
+        echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+        log_info "ELF reverse engineering complete!"
+        echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo "Output directory: $OUTPUT_DIR"
+        echo ""
+        echo "Next steps:"
+        echo "  1. See $OUTPUT_DIR/SUMMARY.md for overview"
+        echo "  2. Check the *_INDEX.md file for function listing"
+        echo "  3. Decompiled sources are in src/ directory (grouped by module)"
+        echo ""
+        exit 0
+    fi
+    
+    # ============================================================
+    # Archive Mode Processing
+    # ============================================================
     
     # Scan for archives
     log_info "Scanning directory: $TARGET_DIR"

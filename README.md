@@ -1,20 +1,22 @@
 # LibSurgeon 🔬
 
-**Static Library Dissector - Automated Reverse Engineering with Ghidra**
+**Static Library & ELF Dissector - Automated Reverse Engineering with Ghidra**
 
-LibSurgeon is a powerful automated tool that performs surgical extraction of C/C++ source code from static library archives (`.a` files). It leverages Ghidra's advanced decompilation engine to reconstruct readable source code from compiled object files.
+LibSurgeon is a powerful automated tool that performs surgical extraction of C/C++ source code from static library archives (`.a` files) and ELF executables/objects. It leverages Ghidra's advanced decompilation engine to reconstruct readable source code from compiled binaries.
 
 ## Features
 
 - 🔍 **Auto-Discovery**: Automatically scans directories for `.a` archives and header files
+- 📦 **ELF Support**: Direct processing of ELF files (.elf, .axf, .out) with intelligent module grouping
 - ⚡ **Parallel Processing**: Multi-threaded decompilation with configurable job count
 - 📊 **Progress Tracking**: Real-time progress display with ETA estimation
 - 📁 **Organized Output**: Clean directory structure with sources, headers, and logs
+- 🧩 **Module Grouping**: Smart function grouping by prefix, alphabet, or CamelCase patterns
 - 📝 **Documentation**: Auto-generated README and summary reports
 
 ## How It Works
 
-### The Decompilation Pipeline
+### Static Library Pipeline (.a files)
 
 ```mermaid
 flowchart LR
@@ -28,19 +30,20 @@ flowchart LR
 3. **Decompilation**: Ghidra's decompiler translates machine code back to C/C++ pseudocode
 4. **Output Generation**: Each object file produces a corresponding `.cpp` source file
 
-### Why Static Libraries?
+### ELF File Pipeline (.elf, .axf, .out)
 
-Static libraries (`.a` files) are collections of object files that get linked directly into executables. Unlike dynamically linked libraries, they:
-- Contain complete compiled code
-- Often preserve symbol names (if not stripped)
-- Can be analyzed without runtime dependencies
+```mermaid
+flowchart LR
+    A["📦 ELF File<br/>(input)"] --> B["🔍 Analyze<br/>Symbols"]
+    B --> C["🧩 Group by<br/>Module"]
+    C --> D["🔬 Ghidra<br/>Decompile"]
+    D --> E["📄 Module .cpp<br/>(output)"]
+```
 
-### Technical Details
-
-- **Target Architecture**: ARM Cortex-M (32-bit Little Endian) by default
-- **Decompiler**: Ghidra's native decompiler with full analysis
-- **Symbol Preservation**: Original function/variable names retained if not stripped
-- **Parallel Safety**: Each object file processed in isolated Ghidra project
+1. **Symbol Analysis**: Extracts function names and identifies naming patterns
+2. **Module Grouping**: Groups functions by prefix (e.g., `EwBmp*`, `EwFnt*`) or other strategies
+3. **Decompilation**: Each module is decompiled to a separate `.cpp` file
+4. **Index Generation**: Creates a function index with addresses for cross-referencing
 
 ## Requirements
 
@@ -55,16 +58,22 @@ Static libraries (`.a` files) are collections of object files that get linked di
 1. Clone or download this repository
 2. Ensure scripts are executable:
    ```bash
-   chmod +x libsurgeon.sh ghidra_decompile.py
+   chmod +x libsurgeon.sh ghidra_decompile.py ghidra_decompile_elf.py
    ```
 3. Install Ghidra from https://ghidra-sre.org/
 
 ## Usage
 
-### Basic Usage
+### Basic Usage - Static Libraries
 
 ```bash
 ./libsurgeon.sh -g /path/to/ghidra <target_directory>
+```
+
+### Basic Usage - ELF Files
+
+```bash
+./libsurgeon.sh -g /path/to/ghidra <elf_file>
 ```
 
 ### Options
@@ -74,49 +83,91 @@ Static libraries (`.a` files) are collections of object files that get linked di
 | `-g, --ghidra <path>` | Path to Ghidra installation (REQUIRED) |
 | `-o, --output <dir>` | Output directory (default: `./libsurgeon_output`) |
 | `-j, --jobs <num>` | Number of parallel jobs (default: auto) |
+| `-m, --module <strategy>` | Module grouping strategy for ELF: `prefix`, `alpha`, `camelcase`, `single` |
 | `-c, --clean` | Clean previous output before processing |
-| `-l, --list` | List archive contents without decompiling |
+| `-l, --list` | List archive/ELF contents without decompiling |
 | `-h, --help` | Show help message |
+
+### Module Grouping Strategies (ELF only)
+
+| Strategy | Description | Best For |
+|----------|-------------|----------|
+| `prefix` | Group by function prefix (e.g., `EwBmp*`, `GfxInit*`) | Libraries with consistent naming |
+| `alpha` | Group by first letter (A-Z) | Very large ELF files |
+| `camelcase` | Extract CamelCase words as module names | OOP-style code |
+| `single` | All functions in one file | Small ELF files |
 
 ### Examples
 
 ```bash
-# Basic decompilation
-./libsurgeon.sh -g /opt/ghidra ./vendor/libs
+# Process static libraries in a directory
+./libsurgeon.sh -g /opt/ghidra ./my_sdk/lib
+./libsurgeon.sh -g /opt/ghidra -j 8 -o ./output ./vendor/libs
 
-# With 8 parallel jobs
-./libsurgeon.sh -g /opt/ghidra -j8 ./sdk/lib
+# Process ELF files with different strategies
+./libsurgeon.sh -g /opt/ghidra ./firmware.elf                    # Default: prefix
+./libsurgeon.sh -g /opt/ghidra -m alpha ./firmware.elf           # Alphabetic
+./libsurgeon.sh -g /opt/ghidra -m camelcase ./firmware.axf       # CamelCase
+./libsurgeon.sh -g /opt/ghidra -m single ./app.out               # Single file
 
-# Clean and reprocess
-./libsurgeon.sh -g /opt/ghidra --clean -o ./my_output ./third_party
+# List contents without decompiling
+./libsurgeon.sh -g /opt/ghidra --list ./firmware.elf
+./libsurgeon.sh --list ./my_sdk/lib
 
-# Just list contents
-./libsurgeon.sh -g /opt/ghidra --list ./libs
+# Filter archives
+./libsurgeon.sh -g /opt/ghidra -i "*touchgfx*" ./sdk
+./libsurgeon.sh -g /opt/ghidra -e "*test*" ./libs
 ```
 
 ## Output Structure
 
+### For Static Libraries (.a)
+
 ```
 libsurgeon_output/
 ├── library_name/
-│   ├── src/              # Decompiled C/C++ source files
+│   ├── src/              # Decompiled source (one .cpp per .o)
 │   │   ├── module1.cpp
 │   │   ├── module2.cpp
 │   │   └── ...
-│   ├── include/          # Copied original headers (if found)
-│   │   └── ...
+│   ├── include/          # Copied original headers
 │   ├── logs/             # Ghidra processing logs
-│   │   ├── module1_ghidra.log
-│   │   └── failed_files.txt
-│   └── README.md         # Library-specific documentation
-└── SUMMARY.md            # Overall summary report
+│   └── README.md
+└── SUMMARY.md
+```
+
+### For ELF Files
+
+```
+libsurgeon_output/
+├── firmware/
+│   ├── src/              # Decompiled source (grouped by module)
+│   │   ├── firmware_EwBmp.cpp      # Bitmap functions
+│   │   ├── firmware_EwFnt.cpp      # Font functions
+│   │   ├── firmware_GfxInit.cpp    # Graphics init
+│   │   └── firmware__misc.cpp      # Ungrouped functions
+│   ├── logs/             # Ghidra processing logs
+│   ├── firmware_INDEX.md # Complete function index
+│   └── README.md
+└── SUMMARY.md
 ```
 
 ## Understanding the Output
 
-### Decompiled Code Characteristics
+### Module Grouping Example
 
-The decompiled C/C++ code will have certain characteristics:
+For an ELF with functions like:
+- `EwBmpInit`, `EwBmpOpen`, `EwBmpClose`
+- `EwFntInit`, `EwFntGetMetrics`
+- `GfxCreateSurface`, `GfxDestroySurface`
+
+Using `prefix` strategy produces:
+- `firmware_EwBmp.cpp` - All EwBmp* functions
+- `firmware_EwFnt.cpp` - All EwFnt* functions  
+- `firmware_GfxCreate.cpp` - GfxCreate* functions
+- `firmware_GfxDestroy.cpp` - GfxDestroy* functions
+
+### Decompiled Code Characteristics
 
 ```cpp
 // Original function names are preserved (if not stripped)
@@ -136,9 +187,10 @@ void HAL_Init(void) {
 ### Tips for Analysis
 
 1. **Start with Headers**: Original headers provide class definitions and API documentation
-2. **Identify Patterns**: Look for common patterns like vtables, constructors, and destructors
-3. **String References**: Search for string literals to understand functionality
-4. **Cross-Reference**: Use Ghidra GUI for interactive exploration of complex code
+2. **Use the Index**: The `*_INDEX.md` file lists all functions with addresses
+3. **Identify Patterns**: Look for common patterns like vtables, constructors, and destructors
+4. **String References**: Search for string literals to understand functionality
+5. **Cross-Reference**: Use Ghidra GUI for interactive exploration of complex code
 
 ## Customization
 
@@ -148,7 +200,7 @@ Edit `libsurgeon.sh` to modify the processor specification:
 
 ```bash
 # For different ARM variants
--processor "ARM:LE:32:Cortex"     # Cortex-M
+-processor "ARM:LE:32:Cortex"     # Cortex-M (default)
 -processor "ARM:LE:32:v7"         # ARMv7
 -processor "ARM:LE:32:v8"         # ARMv8 (32-bit)
 
@@ -160,11 +212,16 @@ Edit `libsurgeon.sh` to modify the processor specification:
 
 ### Ghidra Script Customization
 
-The `ghidra_decompile.py` script can be modified to:
+The decompilation scripts can be modified:
+- `ghidra_decompile.py` - For .a archives (per-object file output)
+- `ghidra_decompile_elf.py` - For ELF files (module-grouped output)
+
+Customization options:
 - Add custom analysis passes
 - Filter specific functions
 - Apply custom naming conventions
 - Export additional metadata
+- Adjust module grouping logic
 
 ## Troubleshooting
 
@@ -176,16 +233,27 @@ The `ghidra_decompile.py` script can be modified to:
 | "Ghidra headless not found" | Verify Ghidra path with `-g` option |
 | Empty output files | Check logs for analysis errors |
 | Memory issues | Reduce parallel jobs with `-j` option |
+| Wrong architecture | Modify `-processor` in the script |
 
 ### Checking Logs
 
 ```bash
-# View Ghidra log for specific file
+# For static libraries
 cat libsurgeon_output/library/logs/module_ghidra.log
-
-# List failed files
 cat libsurgeon_output/library/logs/failed_files.txt
+
+# For ELF files
+cat libsurgeon_output/firmware/logs/ghidra_main.log
+cat libsurgeon_output/firmware/logs/ghidra_script.log
 ```
+
+## Technical Details
+
+- **Target Architecture**: ARM Cortex-M (32-bit Little Endian) by default
+- **Decompiler**: Ghidra's native decompiler with full analysis
+- **Symbol Preservation**: Original function/variable names retained if not stripped
+- **Parallel Safety**: Each object file processed in isolated Ghidra project
+- **ELF Support**: Automatic detection via magic number (0x7f454c46)
 
 ## Performance Tips
 
