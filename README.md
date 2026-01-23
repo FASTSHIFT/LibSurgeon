@@ -142,10 +142,10 @@ libsurgeon_output/
 libsurgeon_output/
 ├── firmware/
 │   ├── src/              # Decompiled source (grouped by module)
-│   │   ├── firmware_EwBmp.cpp      # Bitmap functions
-│   │   ├── firmware_EwFnt.cpp      # Font functions
-│   │   ├── firmware_GfxInit.cpp    # Graphics init
-│   │   └── firmware__misc.cpp      # Ungrouped functions
+│   │   ├── firmware_bitmap.cpp     # Bitmap functions
+│   │   ├── firmware_font.cpp       # Font functions
+│   │   ├── firmware_init.cpp       # Graphics init
+│   │   └── firmware_misc.cpp       # Ungrouped functions
 │   ├── logs/             # Ghidra processing logs
 │   ├── firmware_INDEX.md # Complete function index
 │   └── README.md
@@ -157,13 +157,13 @@ libsurgeon_output/
 ### Module Grouping Example
 
 For an ELF with functions like:
-- `EwBmpInit`, `EwBmpOpen`, `EwBmpClose`
-- `EwFntInit`, `EwFntGetMetrics`
+- `xxBmpInit`, `xxBmpOpen`, `xxBmpClose`
+- `xxFntInit`, `xxFntGetMetrics`
 - `GfxCreateSurface`, `GfxDestroySurface`
 
 Using `prefix` strategy produces:
-- `firmware_EwBmp.cpp` - All EwBmp* functions
-- `firmware_EwFnt.cpp` - All EwFnt* functions  
+- `firmware_bmp.cpp` - All Bmp* functions
+- `firmware_fnt.cpp` - All Fnt* functions  
 - `firmware_GfxCreate.cpp` - GfxCreate* functions
 - `firmware_GfxDestroy.cpp` - GfxDestroy* functions
 
