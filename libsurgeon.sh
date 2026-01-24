@@ -17,7 +17,8 @@
 #   -h, --help              Show help message
 #
 
-set -e
+# Don't use 'set -e' as it causes issues with grep/wc returning non-zero
+# Handle errors explicitly where needed
 
 # ============================================================
 # Configuration
@@ -45,17 +46,8 @@ LIST_ONLY=false
 # Module grouping strategy for ELF files
 MODULE_STRATEGY="prefix"  # prefix|alpha|camelcase|single
 
-# Supported file types configuration
-# Type: archive = needs ar extraction, elf = direct Ghidra processing
-declare -A FILE_TYPE_MAP=(
-    ["a"]="archive"
-    ["lib"]="archive"
-    ["so"]="elf"
-    ["elf"]="elf"
-    ["axf"]="elf"
-    ["out"]="elf"
-    ["o"]="elf"
-)
+# Supported file types:\n#   Archives (need ar extraction): .a, .lib
+#   ELF (direct Ghidra processing): .so, .elf, .axf, .out, .o
 
 # Filter patterns (arrays of glob patterns)
 declare -a EXCLUDE_PATTERNS=()
@@ -778,42 +770,134 @@ get_file_type() {
         ext="${ext,,}"  # Convert to lowercase
     fi
     
-    # Look up in type map
-    if [[ -n "${FILE_TYPE_MAP[$ext]}" ]]; then
-        echo "${FILE_TYPE_MAP[$ext]}"
-    else
-        echo "unknown"
-    fi
+    # Determine type based on extension (avoid associative array issues)
+    case "$ext" in
+        a|lib)
+            echo "archive"
+            ;;
+        so|elf|axf|out|o)
+            echo "elf"
+            ;;
+        *)
+            echo "unknown"
+            ;;
+    esac
 }
 
 # Scan directory for all supported files recursively
+# Outputs files as they are found (for real-time display)
 scan_all_files() {
     local dir="$1"
     
-    # Build find pattern from FILE_TYPE_MAP keys
-    local find_pattern=""
-    for ext in "${!FILE_TYPE_MAP[@]}"; do
-        if [ -n "$find_pattern" ]; then
-            find_pattern="$find_pattern -o"
-        fi
-        find_pattern="$find_pattern -name \"*.$ext\""
-    done
-    # Also match .so.* pattern
-    find_pattern="$find_pattern -o -name \"*.so.*\""
+    # Find all supported file types
+    # Archives: .a, .lib
+    # ELF: .so, .so.*, .elf, .axf, .out, .o
+    find "$dir" \( \
+        -name "*.a" -o \
+        -name "*.lib" -o \
+        -name "*.so" -o \
+        -name "*.so.*" -o \
+        -name "*.elf" -o \
+        -name "*.axf" -o \
+        -name "*.out" -o \
+        -name "*.o" \
+    \) -type f 2>/dev/null
+}
+
+# Scan with real-time display and timing
+scan_with_progress() {
+    local dir="$1"
+    local scan_start=$(date +%s)
+    local file_count=0
+    local archive_count=0
+    local elf_count=0
     
-    # Execute find
-    eval "find \"$dir\" \( $find_pattern \) -type f 2>/dev/null" | sort
+    echo ""
+    draw_section "${CYAN}" "Scanning Directory: ${dir}"
+    echo ""
+    echo -e "${DIM}Supported: .a .lib .so .elf .axf .out .o${NC}"
+    echo ""
+    
+    # Create temp file to store results
+    local temp_file=$(mktemp)
+    
+    # Scan and display in real-time
+    while IFS= read -r file; do
+        ((file_count++))
+        echo "$file" >> "$temp_file"
+        
+        # Get file type for display
+        local ftype=$(get_file_type "$file")
+        local type_label=""
+        case "$ftype" in
+            archive) 
+                ((archive_count++))
+                type_label="${YELLOW}[ARCHIVE]${NC}"
+                ;;
+            elf)
+                ((elf_count++))
+                type_label="${CYAN}[ELF]${NC}"
+                ;;
+            *)
+                type_label="${DIM}[???]${NC}"
+                ;;
+        esac
+        
+        # Calculate elapsed time
+        local now=$(date +%s)
+        local elapsed=$((now - scan_start))
+        
+        # Display found file with relative path
+        local rel_path="${file#$dir/}"
+        if [ "$rel_path" = "$file" ]; then
+            rel_path=$(basename "$file")
+        fi
+        
+        # Update display
+        echo -e "  ${GREEN}[$file_count]${NC} $type_label $rel_path"
+        
+    done < <(scan_all_files "$dir")
+    
+    # Final timing
+    local scan_end=$(date +%s)
+    local total_elapsed=$((scan_end - scan_start))
+    
+    echo ""
+    echo -e "${GREEN}─── Scan Complete ───${NC}"
+    echo -e "  ${BOLD}Total files:${NC} $file_count"
+    echo -e "  ${YELLOW}Archives (.a/.lib):${NC} $archive_count"
+    echo -e "  ${CYAN}ELF files (.so/.elf/.o):${NC} $elf_count"
+    echo -e "  ${BLUE}Scan time:${NC} $(format_time $total_elapsed)"
+    echo ""
+    
+    # Output sorted results
+    sort "$temp_file"
+    rm -f "$temp_file"
 }
 
 # Check if file is a valid ELF (by magic number)
+# Follows symlinks and checks real file
 is_elf_file() {
     local file="$1"
-    if [ ! -f "$file" ]; then
+    
+    # Follow symlinks to get the real file
+    if [ -L "$file" ]; then
+        file=$(readlink -f "$file" 2>/dev/null) || return 1
+    fi
+    
+    # Check file exists and is readable
+    if [ ! -f "$file" ] || [ ! -r "$file" ]; then
         return 1
     fi
     
-    # Check ELF magic number
-    local magic=$(head -c 4 "$file" 2>/dev/null | od -A n -t x1 | tr -d ' ')
+    # Check file size (ELF header is at least 16 bytes)
+    local size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null || echo 0)
+    if [ "$size" -lt 16 ]; then
+        return 1
+    fi
+    
+    # Check ELF magic number (0x7F 'E' 'L' 'F')
+    local magic=$(head -c 4 "$file" 2>/dev/null | od -A n -t x1 2>/dev/null | tr -d ' \n')
     if [[ "$magic" == "7f454c46" ]]; then
         return 0
     fi
@@ -1482,7 +1566,7 @@ main() {
                 SINGLE_FILE_TYPE="elf"
             else
                 log_error "Unsupported file type: $TARGET_DIR"
-                log_error "Supported extensions: ${!FILE_TYPE_MAP[*]}"
+                log_error "Supported: .a .lib .so .elf .axf .out .o"
                 exit 1
             fi
         fi
@@ -1552,13 +1636,13 @@ main() {
     # ============================================================
     # Directory Processing - Scan all supported files
     # ============================================================
-    log_info "Scanning directory recursively: $TARGET_DIR"
     
-    mapfile -t ALL_FILES < <(scan_all_files "$TARGET_DIR")
+    # Scan with real-time progress display
+    mapfile -t ALL_FILES < <(scan_with_progress "$TARGET_DIR")
     
     if [ ${#ALL_FILES[@]} -eq 0 ]; then
         log_error "No supported files found in $TARGET_DIR"
-        log_error "Supported extensions: ${!FILE_TYPE_MAP[*]}"
+        log_error "Supported extensions: a, lib, so, elf, axf, out, o"
         exit 1
     fi
     
@@ -1581,6 +1665,7 @@ main() {
     # Categorize files by type
     declare -a ARCHIVE_FILES=()
     declare -a ELF_FILES=()
+    declare -a SKIPPED_FILES=()
     
     for file in "${ALL_FILES[@]}"; do
         local ftype=$(get_file_type "$file")
@@ -1593,7 +1678,27 @@ main() {
                 if is_elf_file "$file"; then
                     ELF_FILES+=("$file")
                 else
-                    log_warn "Skipping invalid ELF file: $(basename "$file")"
+                    # Provide more diagnostic info
+                    local skip_reason=""
+                    if [ -L "$file" ]; then
+                        local target=$(readlink -f "$file" 2>/dev/null)
+                        if [ ! -e "$target" ]; then
+                            skip_reason="broken symlink -> $target"
+                        else
+                            skip_reason="symlink, target not ELF"
+                        fi
+                    elif [ ! -r "$file" ]; then
+                        skip_reason="not readable"
+                    else
+                        local size=$(stat -c%s "$file" 2>/dev/null || echo 0)
+                        if [ "$size" -lt 16 ]; then
+                            skip_reason="too small (${size} bytes)"
+                        else
+                            skip_reason="no ELF magic header"
+                        fi
+                    fi
+                    log_warn "Skipping: $(basename "$file") ($skip_reason)"
+                    SKIPPED_FILES+=("$file")
                 fi
                 ;;
         esac
