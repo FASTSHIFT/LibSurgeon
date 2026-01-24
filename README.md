@@ -2,16 +2,24 @@
 
 **Static Library & ELF Dissector - Automated Reverse Engineering with Ghidra**
 
-LibSurgeon is a powerful automated tool that performs surgical extraction of C/C++ source code from static library archives (`.a` files) and ELF executables/objects. It leverages Ghidra's advanced decompilation engine to reconstruct readable source code from compiled binaries.
+LibSurgeon is a powerful automated tool that performs surgical extraction of C/C++ source code from static library archives and ELF binaries. It leverages Ghidra's advanced decompilation engine to reconstruct readable source code from compiled binaries.
+
+## Supported File Types
+
+| Type | Extensions | Processing Method |
+|------|------------|-------------------|
+| **Archives** | `.a`, `.lib` | Extract `.o` files, then decompile each |
+| **ELF Files** | `.so`, `.elf`, `.axf`, `.out`, `.o` | Direct decompilation with module grouping |
 
 ## Features
 
-- 🔍 **Auto-Discovery**: Automatically scans directories for `.a` archives and header files
-- 📦 **ELF Support**: Direct processing of ELF files (.elf, .axf, .out) with intelligent module grouping
+- 🔍 **Unified Processing**: One command processes ALL supported file types in a directory
+- 🔄 **Recursive Scanning**: Automatically finds all supported files in subdirectories
 - ⚡ **Parallel Processing**: Multi-threaded decompilation with configurable job count
 - 📊 **Progress Tracking**: Real-time progress display with ETA estimation
 - 📁 **Organized Output**: Clean directory structure with sources, headers, and logs
 - 🧩 **Module Grouping**: Smart function grouping by prefix, alphabet, or CamelCase patterns
+- 🎯 **Flexible Filtering**: Include/exclude patterns work across all file types
 - 📝 **Documentation**: Auto-generated README and summary reports
 
 ## How It Works
@@ -30,7 +38,7 @@ flowchart LR
 3. **Decompilation**: Ghidra's decompiler translates machine code back to C/C++ pseudocode
 4. **Output Generation**: Each object file produces a corresponding `.cpp` source file
 
-### ELF File Pipeline (.elf, .axf, .out)
+### ELF File Pipeline (.elf, .axf, .out, .so)
 
 ```mermaid
 flowchart LR
@@ -44,6 +52,8 @@ flowchart LR
 2. **Module Grouping**: Groups functions by prefix (e.g., `xxBmp*`, `xxFnt*`) or other strategies
 3. **Decompilation**: Each module is decompiled to a separate `.cpp` file
 4. **Index Generation**: Creates a function index with addresses for cross-referencing
+
+> **Note**: Shared libraries (`.so`) use the same pipeline as ELF executables. They are both ELF format files.
 
 ## Requirements
 
@@ -76,6 +86,12 @@ flowchart LR
 ./libsurgeon.sh -g /path/to/ghidra <elf_file>
 ```
 
+### Basic Usage - Shared Libraries
+
+```bash
+./libsurgeon.sh -g /path/to/ghidra <shared_library.so>
+```
+
 ### Options
 
 | Option | Description |
@@ -100,23 +116,25 @@ flowchart LR
 ### Examples
 
 ```bash
-# Process static libraries in a directory
-./libsurgeon.sh -g /opt/ghidra ./my_sdk/lib
-./libsurgeon.sh -g /opt/ghidra -j 8 -o ./output ./vendor/libs
+# Process ALL supported files in a directory (recursive)
+./libsurgeon.sh -g /opt/ghidra ./my_sdk/
 
-# Process ELF files with different strategies
-./libsurgeon.sh -g /opt/ghidra ./firmware.elf                    # Default: prefix
+# Process a single file (auto-detect type)
+./libsurgeon.sh -g /opt/ghidra ./firmware.elf
+./libsurgeon.sh -g /opt/ghidra ./libfoo.a
+./libsurgeon.sh -g /opt/ghidra ./libbar.so
+
+# ELF module grouping strategies
 ./libsurgeon.sh -g /opt/ghidra -m alpha ./firmware.elf           # Alphabetic
 ./libsurgeon.sh -g /opt/ghidra -m camelcase ./firmware.axf       # CamelCase
 ./libsurgeon.sh -g /opt/ghidra -m single ./app.out               # Single file
 
-# List contents without decompiling
-./libsurgeon.sh -g /opt/ghidra --list ./firmware.elf
-./libsurgeon.sh --list ./my_sdk/lib
+# Filter files (works for ALL file types)
+./libsurgeon.sh -g /opt/ghidra -i "libgre*" ./sdk/               # Only libgre*
+./libsurgeon.sh -g /opt/ghidra -e "*test*" ./vendor/             # Exclude tests
 
-# Filter archives
-./libsurgeon.sh -g /opt/ghidra -i "*touchgfx*" ./sdk
-./libsurgeon.sh -g /opt/ghidra -e "*test*" ./libs
+# List contents without decompiling
+./libsurgeon.sh -g /opt/ghidra --list ./my_sdk/
 ```
 
 ## Output Structure

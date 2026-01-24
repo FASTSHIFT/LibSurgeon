@@ -42,10 +42,20 @@ TARGET_DIR=""
 CLEAN_OUTPUT=false
 LIST_ONLY=false
 
-# ELF mode configuration
-ELF_MODE=false
-ELF_FILE=""
+# Module grouping strategy for ELF files
 MODULE_STRATEGY="prefix"  # prefix|alpha|camelcase|single
+
+# Supported file types configuration
+# Type: archive = needs ar extraction, elf = direct Ghidra processing
+declare -A FILE_TYPE_MAP=(
+    ["a"]="archive"
+    ["lib"]="archive"
+    ["so"]="elf"
+    ["elf"]="elf"
+    ["axf"]="elf"
+    ["out"]="elf"
+    ["o"]="elf"
+)
 
 # Filter patterns (arrays of glob patterns)
 declare -a EXCLUDE_PATTERNS=()
@@ -268,10 +278,13 @@ show_help() {
     cat << EOF
 Usage: $0 [options] <target_directory_or_file>
 
-LibSurgeon scans the target directory for static library (.a, .lib) files and
-header files, then decompiles all object files using Ghidra.
-It can also directly process ELF files (.elf, .axf, .out, .o) with intelligent
-module grouping based on function naming conventions.
+LibSurgeon recursively scans the target directory for all supported binary files
+and decompiles them using Ghidra. All supported file types are processed in a
+single unified pass.
+
+Supported File Types:
+  Archives (extract .o then decompile): .a, .lib
+  ELF files (direct decompile):         .so, .elf, .axf, .out, .o
 
 Options:
   -g, --ghidra <path>     Path to Ghidra installation (REQUIRED)
@@ -282,36 +295,39 @@ Options:
                             alpha     - Group by first letter (A-Z)
                             camelcase - Group by CamelCase words
                             single    - All functions in one file
-  -i, --include <pattern> Only include archives matching pattern (can be used multiple times)
-  -e, --exclude <pattern> Exclude archives matching pattern (can be used multiple times)
+  -i, --include <pattern> Only include files matching pattern (can be used multiple times)
+  -e, --exclude <pattern> Exclude files matching pattern (can be used multiple times)
   -c, --clean             Clean previous output before processing
-  -l, --list              List archive contents without decompiling
+  -l, --list              List file contents without decompiling
   -h, --help              Show this help message
 
-Filter Rules (for .a archives):
-  - If --include is specified, only matching archives are processed
-  - If --exclude is specified, matching archives are skipped
-  - --include is applied first, then --exclude
+Filter Rules:
+  - Directory scanning is RECURSIVE (searches all subdirectories)
+  - Filters apply to ALL supported file types (.a, .lib, .so, .elf, etc.)
+  - If --include is specified, only matching files are processed
+  - If --exclude is specified, matching files are skipped
   - Patterns support wildcards: * (any chars), ? (single char), [abc] (char set)
 
 Examples:
-  # Process static libraries in a directory
-  $0 -g /opt/ghidra ./my_sdk/lib
-  $0 -g /opt/ghidra -j 8 -o ./output ./vendor/libs
+  # Process ALL supported files in a directory (recursive)
+  $0 -g /opt/ghidra ./my_sdk/
 
-  # Process a single ELF file with different module strategies
-  $0 -g /opt/ghidra ./firmware.elf                   # Default: prefix grouping
+  # Process a single file (auto-detect type)
+  $0 -g /opt/ghidra ./firmware.elf
+  $0 -g /opt/ghidra ./libfoo.a
+  $0 -g /opt/ghidra ./libbar.so
+
+  # ELF module grouping strategies
   $0 -g /opt/ghidra -m alpha ./firmware.elf          # Alphabetic grouping
   $0 -g /opt/ghidra -m camelcase ./firmware.axf      # CamelCase word grouping
   $0 -g /opt/ghidra -m single ./app.out              # Single file output
 
-  # Filtering examples
-  $0 -g /opt/ghidra -i "*touchgfx*" ./sdk           # Only process touchgfx
-  $0 -g /opt/ghidra -i "libfoo*" -i "libbar*" ./libs # Process foo and bar only
-  $0 -g /opt/ghidra -e "*jpeg*" -e "*png*" ./third_party
+  # Filter files
+  $0 -g /opt/ghidra -i "libgre*" ./sdk/              # Only libgre* files
+  $0 -g /opt/ghidra -e "*test*" ./vendor/            # Exclude test libraries
 
-  # List contents only
-  $0 --list ./my_sdk/lib
+  # List contents only (no decompilation)
+  $0 -g /opt/ghidra --list ./my_sdk/
 
 Output Structure:
   For .a archives:
@@ -402,44 +418,8 @@ check_dependencies() {
 }
 
 # ============================================================
-# ELF File Detection and Processing
+# ELF File Processing
 # ============================================================
-
-# Check if a file is an ELF file
-is_elf_file() {
-    local file="$1"
-    if [ ! -f "$file" ]; then
-        return 1
-    fi
-    
-    # Check ELF magic number
-    local magic=$(head -c 4 "$file" 2>/dev/null | od -A n -t x1 | tr -d ' ')
-    if [[ "$magic" == "7f454c46" ]]; then
-        return 0
-    fi
-    return 1
-}
-
-# Check if target is an ELF file (by extension or magic)
-detect_elf_input() {
-    local target="$1"
-    
-    # Check by extension first
-    case "$target" in
-        *.elf|*.ELF|*.axf|*.AXF|*.out|*.bin)
-            if [ -f "$target" ] && is_elf_file "$target"; then
-                return 0
-            fi
-        ;;
-    esac
-    
-    # Check by magic number for files without standard extension
-    if [ -f "$target" ] && is_elf_file "$target"; then
-        return 0
-    fi
-    
-    return 1
-}
 
 # List symbols in an ELF file
 list_elf_contents() {
@@ -778,10 +758,66 @@ EOF
 EOF
 }
 
-# Scan directory for .a and .lib files
-scan_archives() {
+# ============================================================
+# Unified File Scanning and Type Detection
+# ============================================================
+
+# Get file type based on extension
+# Returns: archive, elf, or unknown
+get_file_type() {
+    local file="$1"
+    local basename=$(basename "$file")
+    local ext=""
+    
+    # Handle .so.* pattern (e.g., libfoo.so.1.2.3)
+    if [[ "$basename" == *.so.* ]]; then
+        ext="so"
+    else
+        # Get extension (lowercase)
+        ext="${basename##*.}"
+        ext="${ext,,}"  # Convert to lowercase
+    fi
+    
+    # Look up in type map
+    if [[ -n "${FILE_TYPE_MAP[$ext]}" ]]; then
+        echo "${FILE_TYPE_MAP[$ext]}"
+    else
+        echo "unknown"
+    fi
+}
+
+# Scan directory for all supported files recursively
+scan_all_files() {
     local dir="$1"
-    find "$dir" \( -name "*.a" -o -name "*.lib" \) -type f 2>/dev/null | sort
+    
+    # Build find pattern from FILE_TYPE_MAP keys
+    local find_pattern=""
+    for ext in "${!FILE_TYPE_MAP[@]}"; do
+        if [ -n "$find_pattern" ]; then
+            find_pattern="$find_pattern -o"
+        fi
+        find_pattern="$find_pattern -name \"*.$ext\""
+    done
+    # Also match .so.* pattern
+    find_pattern="$find_pattern -o -name \"*.so.*\""
+    
+    # Execute find
+    eval "find \"$dir\" \( $find_pattern \) -type f 2>/dev/null" | sort
+}
+
+# Check if file is a valid ELF (by magic number)
+is_elf_file() {
+    local file="$1"
+    if [ ! -f "$file" ]; then
+        return 1
+    fi
+    
+    # Check ELF magic number
+    local magic=$(head -c 4 "$file" 2>/dev/null | od -A n -t x1 | tr -d ' ')
+    if [[ "$magic" == "7f454c46" ]]; then
+        return 0
+    fi
+    return 1
 }
 
 # Check if archive should be excluded based on patterns
@@ -1427,120 +1463,38 @@ main() {
         exit 1
     fi
     
-    # Check if target is an ELF file
-    if detect_elf_input "$TARGET_DIR"; then
-        ELF_MODE=true
-        ELF_FILE=$(realpath "$TARGET_DIR")
-        log_info "Detected ELF file input: $ELF_FILE"
-        elif [ -f "$TARGET_DIR" ]; then
-        # It's a file but not ELF - check if it's a .a or .lib archive
-        if [[ "$TARGET_DIR" == *.a ]] || [[ "$TARGET_DIR" == *.lib ]]; then
-            # Single archive file - treat as directory containing just this file
-            TARGET_DIR=$(realpath "$TARGET_DIR")
-            log_info "Single archive file: $TARGET_DIR"
-        else
-            log_error "Unsupported file type: $TARGET_DIR"
-            log_error "Supported: .a, .lib (archive), .elf, .axf, .out (ELF files)"
-            exit 1
+    # ============================================================
+    # Unified Processing Logic
+    # ============================================================
+    
+    local SINGLE_FILE_MODE=false
+    local SINGLE_FILE=""
+    local SINGLE_FILE_TYPE=""
+    
+    # Check if target is a single file or directory
+    if [ -f "$TARGET_DIR" ]; then
+        SINGLE_FILE=$(realpath "$TARGET_DIR")
+        SINGLE_FILE_TYPE=$(get_file_type "$SINGLE_FILE")
+        
+        if [ "$SINGLE_FILE_TYPE" = "unknown" ]; then
+            # Try ELF magic detection for files without recognized extension
+            if is_elf_file "$SINGLE_FILE"; then
+                SINGLE_FILE_TYPE="elf"
+            else
+                log_error "Unsupported file type: $TARGET_DIR"
+                log_error "Supported extensions: ${!FILE_TYPE_MAP[*]}"
+                exit 1
+            fi
         fi
-        elif [ ! -d "$TARGET_DIR" ]; then
+        
+        SINGLE_FILE_MODE=true
+        log_info "Single file mode: $SINGLE_FILE (type: $SINGLE_FILE_TYPE)"
+        
+    elif [ ! -d "$TARGET_DIR" ]; then
         log_error "Target does not exist: $TARGET_DIR"
         exit 1
     else
         TARGET_DIR=$(realpath "$TARGET_DIR")
-    fi
-    
-    # ============================================================
-    # ELF Mode Processing
-    # ============================================================
-    if [ "$ELF_MODE" = true ]; then
-        # List only mode for ELF
-        if [ "$LIST_ONLY" = true ]; then
-            list_elf_contents "$ELF_FILE"
-            exit 0
-        fi
-        
-        # Check dependencies
-        check_dependencies
-        
-        # Clean output
-        if [ "$CLEAN_OUTPUT" = true ] && [ -d "$OUTPUT_DIR" ]; then
-            log_warn "Cleaning output directory: $OUTPUT_DIR"
-            rm -rf "$OUTPUT_DIR"
-        fi
-        
-        # Create output directory
-        mkdir -p "$OUTPUT_DIR"
-        OUTPUT_DIR=$(realpath "$OUTPUT_DIR")
-        
-        # Setup cleanup trap
-        trap "cleanup" EXIT
-        
-        # Process ELF file
-        decompile_elf_file "$ELF_FILE" "$OUTPUT_DIR" "$MODULE_STRATEGY"
-        
-        # Generate global summary
-        generate_global_summary "$OUTPUT_DIR"
-        
-        # Done
-        echo ""
-        echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-        log_info "ELF reverse engineering complete!"
-        echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-        echo ""
-        echo "Output directory: $OUTPUT_DIR"
-        echo ""
-        echo "Next steps:"
-        echo "  1. See $OUTPUT_DIR/SUMMARY.md for overview"
-        echo "  2. Check the *_INDEX.md file for function listing"
-        echo "  3. Decompiled sources are in src/ directory (grouped by module)"
-        echo ""
-        exit 0
-    fi
-    
-    # ============================================================
-    # Archive Mode Processing
-    # ============================================================
-    
-    # Scan for archives
-    log_info "Scanning directory: $TARGET_DIR"
-    
-    mapfile -t ARCHIVES < <(scan_archives "$TARGET_DIR")
-    
-    if [ ${#ARCHIVES[@]} -eq 0 ]; then
-        log_error "No .a or .lib archive files found in $TARGET_DIR"
-        exit 1
-    fi
-    
-    log_info "Found ${#ARCHIVES[@]} archive(s)"
-    
-    # Apply include/exclude filters
-    if [ ${#INCLUDE_PATTERNS[@]} -gt 0 ] || [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
-        if [ ${#INCLUDE_PATTERNS[@]} -gt 0 ]; then
-            log_info "Include filters: ${INCLUDE_PATTERNS[*]}"
-        fi
-        if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
-            log_info "Exclude filters: ${EXCLUDE_PATTERNS[*]}"
-        fi
-        filter_archives ARCHIVES
-    fi
-    
-    if [ ${#ARCHIVES[@]} -eq 0 ]; then
-        log_error "No archives left after filtering"
-        exit 1
-    fi
-    
-    log_info "Archives to process:"
-    for archive in "${ARCHIVES[@]}"; do
-        echo "  - $(basename "$archive")"
-    done
-    
-    # List only mode
-    if [ "$LIST_ONLY" = true ]; then
-        for archive in "${ARCHIVES[@]}"; do
-            list_archive_contents "$archive"
-        done
-        exit 0
     fi
     
     # Check dependencies
@@ -1559,38 +1513,172 @@ main() {
     # Setup cleanup trap
     trap "cleanup" EXIT
     
-    # Track used library names to handle duplicates
-    declare -A used_lib_names
-    
-    # Process each archive
-    for archive in "${ARCHIVES[@]}"; do
-        # Remove both .a and .lib extensions
-        local lib_name=$(basename "$archive")
-        lib_name="${lib_name%.a}"
-        lib_name="${lib_name%.lib}"
-        lib_name=${lib_name#lib}  # Remove lib prefix
-        
-        # Handle duplicate library names
-        if [ -n "${used_lib_names[$lib_name]}" ]; then
-            # Generate unique name using parent directory
-            local parent_dir=$(basename "$(dirname "$archive")")
-            local unique_name="${lib_name}_${parent_dir}"
-            
-            # If still duplicate, add counter
-            local counter=1
-            while [ -n "${used_lib_names[$unique_name]}" ]; do
-                unique_name="${lib_name}_${parent_dir}_${counter}"
-                ((counter++))
-            done
-            
-            log_warn "Duplicate library name '$lib_name', using '$unique_name'"
-            lib_name="$unique_name"
+    # ============================================================
+    # Single File Processing
+    # ============================================================
+    if [ "$SINGLE_FILE_MODE" = true ]; then
+        if [ "$LIST_ONLY" = true ]; then
+            if [ "$SINGLE_FILE_TYPE" = "archive" ]; then
+                list_archive_contents "$SINGLE_FILE"
+            else
+                list_elf_contents "$SINGLE_FILE"
+            fi
+            exit 0
         fi
         
-        used_lib_names[$lib_name]=1
+        if [ "$SINGLE_FILE_TYPE" = "archive" ]; then
+            local lib_name=$(basename "$SINGLE_FILE")
+            lib_name="${lib_name%.a}"
+            lib_name="${lib_name%.lib}"
+            lib_name=${lib_name#lib}
+            decompile_library "$lib_name" "$SINGLE_FILE" "$OUTPUT_DIR"
+        else
+            decompile_elf_file "$SINGLE_FILE" "$OUTPUT_DIR" "$MODULE_STRATEGY"
+        fi
         
-        decompile_library "$lib_name" "$archive" "$OUTPUT_DIR"
+        # Generate global summary
+        generate_global_summary "$OUTPUT_DIR"
+        
+        echo ""
+        echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+        log_info "Reverse engineering complete!"
+        echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo "Output directory: $OUTPUT_DIR"
+        echo ""
+        exit 0
+    fi
+    
+    # ============================================================
+    # Directory Processing - Scan all supported files
+    # ============================================================
+    log_info "Scanning directory recursively: $TARGET_DIR"
+    
+    mapfile -t ALL_FILES < <(scan_all_files "$TARGET_DIR")
+    
+    if [ ${#ALL_FILES[@]} -eq 0 ]; then
+        log_error "No supported files found in $TARGET_DIR"
+        log_error "Supported extensions: ${!FILE_TYPE_MAP[*]}"
+        exit 1
+    fi
+    
+    # Apply include/exclude filters
+    if [ ${#INCLUDE_PATTERNS[@]} -gt 0 ] || [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+        if [ ${#INCLUDE_PATTERNS[@]} -gt 0 ]; then
+            log_info "Include filters: ${INCLUDE_PATTERNS[*]}"
+        fi
+        if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+            log_info "Exclude filters: ${EXCLUDE_PATTERNS[*]}"
+        fi
+        filter_archives ALL_FILES
+    fi
+    
+    if [ ${#ALL_FILES[@]} -eq 0 ]; then
+        log_error "No files left after filtering"
+        exit 1
+    fi
+    
+    # Categorize files by type
+    declare -a ARCHIVE_FILES=()
+    declare -a ELF_FILES=()
+    
+    for file in "${ALL_FILES[@]}"; do
+        local ftype=$(get_file_type "$file")
+        case "$ftype" in
+            archive)
+                ARCHIVE_FILES+=("$file")
+                ;;
+            elf)
+                # Verify it's actually a valid ELF file
+                if is_elf_file "$file"; then
+                    ELF_FILES+=("$file")
+                else
+                    log_warn "Skipping invalid ELF file: $(basename "$file")"
+                fi
+                ;;
+        esac
     done
+    
+    log_info "Found ${#ARCHIVE_FILES[@]} archive(s) and ${#ELF_FILES[@]} ELF file(s)"
+    
+    # Show files to process
+    if [ ${#ARCHIVE_FILES[@]} -gt 0 ]; then
+        echo -e "${CYAN}Archives (.a/.lib):${NC}"
+        for f in "${ARCHIVE_FILES[@]}"; do
+            echo "  - $(basename "$f")"
+        done
+    fi
+    if [ ${#ELF_FILES[@]} -gt 0 ]; then
+        echo -e "${CYAN}ELF files (.so/.elf/.axf/.out/.o):${NC}"
+        for f in "${ELF_FILES[@]}"; do
+            echo "  - $(basename "$f")"
+        done
+    fi
+    
+    # List only mode
+    if [ "$LIST_ONLY" = true ]; then
+        for archive in "${ARCHIVE_FILES[@]}"; do
+            list_archive_contents "$archive"
+        done
+        for elf in "${ELF_FILES[@]}"; do
+            list_elf_contents "$elf"
+        done
+        exit 0
+    fi
+    
+    # Track used names to handle duplicates
+    declare -A used_names
+    local total_processed=0
+    
+    # ============================================================
+    # Process Archive Files (.a, .lib)
+    # ============================================================
+    if [ ${#ARCHIVE_FILES[@]} -gt 0 ]; then
+        echo ""
+        draw_section "${BLUE}" "Processing Archives (${#ARCHIVE_FILES[@]} files)"
+        echo ""
+        
+        for archive in "${ARCHIVE_FILES[@]}"; do
+            local lib_name=$(basename "$archive")
+            lib_name="${lib_name%.a}"
+            lib_name="${lib_name%.lib}"
+            lib_name=${lib_name#lib}  # Remove lib prefix
+            
+            # Handle duplicate names
+            if [ -n "${used_names[$lib_name]}" ]; then
+                local parent_dir=$(basename "$(dirname "$archive")")
+                local unique_name="${lib_name}_${parent_dir}"
+                local counter=1
+                while [ -n "${used_names[$unique_name]}" ]; do
+                    unique_name="${lib_name}_${parent_dir}_${counter}"
+                    ((counter++))
+                done
+                log_warn "Duplicate name '$lib_name', using '$unique_name'"
+                lib_name="$unique_name"
+            fi
+            used_names[$lib_name]=1
+            
+            decompile_library "$lib_name" "$archive" "$OUTPUT_DIR"
+            ((total_processed++))
+        done
+    fi
+    
+    # ============================================================
+    # Process ELF Files (.so, .elf, .axf, .out, .o)
+    # ============================================================
+    if [ ${#ELF_FILES[@]} -gt 0 ]; then
+        echo ""
+        draw_section "${CYAN}" "Processing ELF Files (${#ELF_FILES[@]} files)"
+        echo ""
+        
+        local elf_count=0
+        for elf_file in "${ELF_FILES[@]}"; do
+            ((elf_count++))
+            log_info "Processing ELF $elf_count/${#ELF_FILES[@]}: $(basename "$elf_file")"
+            decompile_elf_file "$elf_file" "$OUTPUT_DIR" "$MODULE_STRATEGY"
+            ((total_processed++))
+        done
+    fi
     
     # Generate global summary
     generate_global_summary "$OUTPUT_DIR"
@@ -1598,7 +1686,7 @@ main() {
     # Done
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-    log_info "Reverse engineering complete!"
+    log_info "Reverse engineering complete! ($total_processed files processed)"
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
     echo ""
     echo "Output directory: $OUTPUT_DIR"
@@ -1606,7 +1694,7 @@ main() {
     echo "Next steps:"
     echo "  1. See $OUTPUT_DIR/SUMMARY.md for details"
     echo "  2. Decompiled sources are in each library's src/ directory"
-    echo "  3. Headers are in each library's include/ directory"
+    echo "  3. Headers are in each library's include/ directory (for archives)"
     echo ""
 }
 
