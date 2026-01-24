@@ -41,7 +41,7 @@ flowchart LR
 ```
 
 1. **Symbol Analysis**: Extracts function names and identifies naming patterns
-2. **Module Grouping**: Groups functions by prefix (e.g., `EwBmp*`, `EwFnt*`) or other strategies
+2. **Module Grouping**: Groups functions by prefix (e.g., `xxBmp*`, `xxFnt*`) or other strategies
 3. **Decompilation**: Each module is decompiled to a separate `.cpp` file
 4. **Index Generation**: Creates a function index with addresses for cross-referencing
 
@@ -92,7 +92,7 @@ flowchart LR
 
 | Strategy | Description | Best For |
 |----------|-------------|----------|
-| `prefix` | Group by function prefix (e.g., `EwBmp*`, `GfxInit*`) | Libraries with consistent naming |
+| `prefix` | Group by function prefix (e.g., `xxBmp*`, `GfxInit*`) | Libraries with consistent naming |
 | `alpha` | Group by first letter (A-Z) | Very large ELF files |
 | `camelcase` | Extract CamelCase words as module names | OOP-style code |
 | `single` | All functions in one file | Small ELF files |
