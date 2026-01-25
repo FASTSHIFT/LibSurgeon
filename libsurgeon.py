@@ -683,7 +683,7 @@ Examples:
   python libsurgeon.py -g /opt/ghidra ./my_sdk/
 
   # Process a single archive with quality evaluation
-  python libsurgeon.py -g /opt/ghidra --evaluate libtouchgfx.a
+  python libsurgeon.py -g /opt/ghidra --evaluate lib.a
 
   # Parallel decompilation
   python libsurgeon.py -g /opt/ghidra -j 4 ./libraries/

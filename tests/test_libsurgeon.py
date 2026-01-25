@@ -61,7 +61,7 @@ def sample_cpp_file(temp_dir):
 #include <stdint.h>
 #include <stdbool.h>
 
-namespace touchgfx {
+namespace xxgfx {
 
 // ============================================================
 // Class: TestClass
@@ -86,7 +86,7 @@ int TestClass::anotherFunction(void)
     return *(int *)(this + 0x10);
 }
 
-} // namespace touchgfx
+} // namespace xxgfx
 """
     filepath = os.path.join(temp_dir, "TestModule.cpp")
     with open(filepath, "w") as f:
@@ -239,7 +239,7 @@ class TestQualityEvaluation:
         assert metrics.halt_baddata == 0
         assert metrics.lines > 0
         assert metrics.quality_score >= 80
-        assert "touchgfx" in metrics.namespaces_found
+        assert "xxgfx" in metrics.namespaces_found
 
     def test_analyze_bad_file(self, sample_bad_cpp_file):
         """Test analyzing a file with quality issues"""

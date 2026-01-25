@@ -55,7 +55,7 @@ pip install -r requirements-dev.txt
 
 ```bash
 # Process a static library
-python libsurgeon.py -g /path/to/ghidra libtouchgfx.a
+python libsurgeon.py -g /path/to/ghidra lib.a
 
 # Process all archives in a directory
 python libsurgeon.py -g /path/to/ghidra ./my_sdk/
@@ -199,17 +199,17 @@ GitHub Actions runs on every push and pull request:
 
 ## 📋 Examples
 
-### Decompile TouchGFX Library
+### Decompile xxGFX Library
 
 ```bash
 # Extract and decompile ARM library
 python libsurgeon.py -g ~/ghidra_11.2.1_PUBLIC \
-    -o touchgfx_output \
+    -o xxgfx_output \
     --evaluate \
-    ./libtouchgfx.a
+    ./lib.a
 
 # Check quality
-python evaluate_quality.py touchgfx_output/libtouchgfx/src/
+python evaluate_quality.py xxgfx_output/lib/src/
 ```
 
 ### Process Multiple Libraries
