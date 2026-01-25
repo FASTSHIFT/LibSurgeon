@@ -12,23 +12,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-# Add parent directory to path
+# Add parent directory to path for direct execution
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from similarity_analyzer import (
+from similarity_analyzer import (  # noqa: E402
     normalize_code,
     calc_similarity,
     load_file,
     compare_pair,
     group_by_pattern,
     analyze_group,
-    find_similar_pairs,
     format_time,
     FileData,
-    SimilarityResult,
-    GroupAnalysis,
     DEFAULT_VARIANTS,
-    DEFAULT_PATTERNS,
 )
 
 
