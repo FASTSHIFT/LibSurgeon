@@ -24,7 +24,6 @@ Usage:
 import argparse
 import glob
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -34,8 +33,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 # ============================================================
 # Color and Display Utilities
@@ -386,7 +384,7 @@ def decompile_object_file(
             "-deleteProject",
         ]
 
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
         # Check for output file
         temp_output = os.path.join(output_dir, f"{basename}_decompiled.cpp")
@@ -568,7 +566,7 @@ def generate_archive_readme(name: str, output_dir: str, result: BatchResult):
 
     with open(readme_path, "w") as f:
         f.write(f"# {name} - Decompiled Archive\n\n")
-        f.write(f"## Overview\n\n")
+        f.write("## Overview\n\n")
         f.write(f"- **Source**: {name}.a\n")
         f.write(f"- **Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"- **Total object files**: {result.total}\n")
@@ -650,8 +648,8 @@ def generate_summary(output_dir: str, results: Dict[str, BatchResult]):
         f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
         f.write("## Overall Statistics\n\n")
-        f.write(f"| Metric | Value |\n")
-        f.write(f"|--------|-------|\n")
+        f.write("| Metric | Value |\n")
+        f.write("|--------|-------|\n")
         f.write(f"| Total Libraries | {len(results)} |\n")
         f.write(f"| Total Object Files | {total_files} |\n")
         f.write(f"| Successfully Decompiled | {total_success} |\n")

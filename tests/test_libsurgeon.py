@@ -15,10 +15,7 @@ Usage:
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
-from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -27,7 +24,6 @@ import pytest
 from evaluate_quality import (
     PATTERNS,
     FileMetrics,
-    ProjectMetrics,
     analyze_directory,
     analyze_file,
 )
@@ -38,7 +34,6 @@ from libsurgeon import (
     format_time,
     get_file_type,
     is_archive_file,
-    is_elf_file,
     matches_pattern,
 )
 
@@ -190,21 +185,21 @@ class TestPatternMatching:
 
     def test_exact_match(self):
         """Test exact filename matching"""
-        assert matches_pattern("libfoo.a", "libfoo.a") == True
-        assert matches_pattern("libfoo.a", "libbar.a") == False
+        assert matches_pattern("libfoo.a", "libfoo.a") is True
+        assert matches_pattern("libfoo.a", "libbar.a") is False
 
     def test_wildcard_match(self):
         """Test wildcard pattern matching"""
-        assert matches_pattern("libfoo.a", "lib*.a") == True
-        assert matches_pattern("libfoo.a", "*.a") == True
-        assert matches_pattern("libfoo.a", "libfoo.*") == True
-        assert matches_pattern("libfoo.a", "*.so") == False
+        assert matches_pattern("libfoo.a", "lib*.a") is True
+        assert matches_pattern("libfoo.a", "*.a") is True
+        assert matches_pattern("libfoo.a", "libfoo.*") is True
+        assert matches_pattern("libfoo.a", "*.so") is False
 
     def test_question_mark(self):
         """Test single character wildcard"""
-        assert matches_pattern("libfoo.a", "libfo?.a") == True
-        assert matches_pattern("libfoo.a", "lib???.a") == True
-        assert matches_pattern("libfoo.a", "lib??.a") == False
+        assert matches_pattern("libfoo.a", "libfo?.a") is True
+        assert matches_pattern("libfoo.a", "lib???.a") is True
+        assert matches_pattern("libfoo.a", "lib??.a") is False
 
 
 class TestTimeFormatting:
@@ -310,13 +305,13 @@ class TestArchiveProcessing:
 
     def test_is_archive_file(self, test_archive, temp_dir):
         """Test archive magic number detection"""
-        assert is_archive_file(test_archive) == True
+        assert is_archive_file(test_archive) is True
 
         # Create a non-archive file
         fake_file = os.path.join(temp_dir, "fake.a")
         with open(fake_file, "w") as f:
             f.write("not an archive")
-        assert is_archive_file(fake_file) == False
+        assert is_archive_file(fake_file) is False
 
 
 # ============================================================

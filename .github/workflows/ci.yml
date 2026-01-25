@@ -29,11 +29,11 @@ jobs:
     
     - name: Check formatting with black
       run: |
-        python -m black --check --diff *.py tests/*.py
+        python -m black --check --diff libsurgeon.py evaluate_quality.py tests/*.py
     
     - name: Lint with flake8
       run: |
-        python -m flake8 *.py tests/*.py --max-line-length=88 --extend-ignore=E203,E501,W503
+        python -m flake8 libsurgeon.py evaluate_quality.py tests/*.py --max-line-length=88 --extend-ignore=E203,E501,W503
 
   # ============================================================
   # Unit Tests

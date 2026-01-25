@@ -25,10 +25,8 @@ import json
 import os
 import re
 import sys
-from collections import defaultdict
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import List, Tuple
 
 
 class Colors:
