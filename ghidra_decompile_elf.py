@@ -30,7 +30,6 @@ import os
 import re
 from collections import defaultdict
 
-
 # Ghidra undefined type to standard C type mapping
 # For 'undefined' types, we use custom typedefs (unk8_t, unk16_t, etc.)
 # since Ghidra cannot determine signedness. Users can adjust as needed.

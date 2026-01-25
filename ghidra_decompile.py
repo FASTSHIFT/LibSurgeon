@@ -78,15 +78,15 @@ def should_skip_function(func):
     garbage decompilation (halt_baddata).
     """
     func_name = func.getName()
-    
+
     # Skip functions in EXTERNAL block (libc, libstdc++, etc.)
     if func.isExternal():
         return True
-    
+
     # Skip thunk functions (jump stubs)
     if func.isThunk():
         return True
-    
+
     # Skip functions with addresses in EXTERNAL memory block
     addr = func.getEntryPoint()
     mem = currentProgram.getMemory()
@@ -96,7 +96,7 @@ def should_skip_function(func):
         # Skip EXTERNAL and .group.* sections
         if block_name == "EXTERNAL" or block_name.startswith(".group"):
             return True
-    
+
     # Skip common libc/libstdc++ external function names
     skip_patterns = [
         "__stack_chk_fail",
@@ -113,7 +113,7 @@ def should_skip_function(func):
     for pattern in skip_patterns:
         if pattern in func_name:
             return True
-    
+
     return False
 
 
