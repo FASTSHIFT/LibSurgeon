@@ -13,10 +13,10 @@ Usage:
 """
 
 import os
-import sys
-import tempfile
 import shutil
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -25,23 +25,23 @@ import pytest
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from batch_decompile import extract_archive, validate_ghidra
 from evaluate_quality import (
-    analyze_file,
-    analyze_directory,
+    PATTERNS,
     FileMetrics,
     ProjectMetrics,
-    PATTERNS,
+    analyze_directory,
+    analyze_file,
 )
 from libsurgeon import (
-    get_file_type,
-    FileType,
-    is_elf_file,
-    is_archive_file,
-    matches_pattern,
-    format_time,
     Colors,
+    FileType,
+    format_time,
+    get_file_type,
+    is_archive_file,
+    is_elf_file,
+    matches_pattern,
 )
-from batch_decompile import validate_ghidra, extract_archive
 
 # ============================================================
 # Fixtures

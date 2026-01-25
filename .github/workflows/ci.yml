@@ -29,15 +29,15 @@ jobs:
     
     - name: Check formatting with black
       run: |
-        black --check --diff *.py tests/*.py
+        python -m black --check --diff *.py tests/*.py
     
     - name: Check import sorting with isort
       run: |
-        isort --check-only --diff --profile black *.py tests/*.py
+        python -m isort --check-only --diff --profile black *.py tests/*.py
     
     - name: Lint with flake8
       run: |
-        flake8 *.py tests/*.py --max-line-length=88 --extend-ignore=E203,E501,W503
+        python -m flake8 *.py tests/*.py --max-line-length=88 --extend-ignore=E203,E501,W503
 
   # ============================================================
   # Unit Tests

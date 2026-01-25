@@ -123,14 +123,13 @@ python evaluate_quality.py ./output/ --json report.json
 | D | 50+ | Poor - significant issues |
 | F | <50 | Failed - mostly unusable |
 
-### `format.py` - Code Formatting
+### `format.sh` - Code Formatting
 
-Automatic code formatting and linting.
+Automatic code formatting and linting (shell script).
 
 ```bash
-python format.py                    # Format all files
-python format.py --check            # Check without formatting
-python format.py --lint             # Run linters only
+./format.sh                    # Format all files
+./format.sh --check            # Check without formatting (CI mode)
 ```
 
 ## 📊 Output Structure
@@ -183,10 +182,10 @@ This project uses [black](https://github.com/psf/black) for code formatting and 
 pip install -r requirements-dev.txt
 
 # Format code
-python format.py
+./format.sh
 
 # Check formatting (CI mode)
-python format.py --check
+./format.sh --check
 ```
 
 ### CI/CD

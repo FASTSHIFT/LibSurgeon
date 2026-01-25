@@ -20,15 +20,15 @@ Usage:
 """
 
 import argparse
+import glob
+import json
 import os
 import re
 import sys
-import glob
-import json
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
 from collections import defaultdict
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 
 class Colors:

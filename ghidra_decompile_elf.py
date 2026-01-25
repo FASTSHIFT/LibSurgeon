@@ -15,20 +15,23 @@ Module Grouping Strategies:
   - single: All functions in one file
 """
 
-# Ghidra Python scripts use Jython with Ghidra's API
-from ghidra.app.decompiler import DecompInterface
-from ghidra.util.task import ConsoleTaskMonitor
-from ghidra.program.model.symbol import SourceType
-from ghidra.program.model.data import StructureDataType, EnumDataType, TypedefDataType
-from ghidra.program.model.data import (
-    ArrayDataType,
-    PointerDataType,
-    FunctionDefinitionDataType,
-)
-from java.io import File
 import os
 import re
 from collections import defaultdict
+
+# Ghidra Python scripts use Jython with Ghidra's API
+from ghidra.app.decompiler import DecompInterface
+from ghidra.program.model.data import (
+    ArrayDataType,
+    EnumDataType,
+    FunctionDefinitionDataType,
+    PointerDataType,
+    StructureDataType,
+    TypedefDataType,
+)
+from ghidra.program.model.symbol import SourceType
+from ghidra.util.task import ConsoleTaskMonitor
+from java.io import File
 
 # Ghidra undefined type to standard C type mapping
 # For 'undefined' types, we use custom typedefs (unk8_t, unk16_t, etc.)

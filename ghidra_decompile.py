@@ -7,13 +7,14 @@ This script runs in Ghidra's Headless mode to automatically analyze
 and decompile object files (.o) from static libraries (.a).
 """
 
-# Ghidra Python scripts use Jython with Ghidra's API
-from ghidra.app.decompiler import DecompInterface
-from ghidra.util.task import ConsoleTaskMonitor
-from ghidra.program.model.symbol import SourceType
-from java.io import File
 import os
 import re
+
+# Ghidra Python scripts use Jython with Ghidra's API
+from ghidra.app.decompiler import DecompInterface
+from ghidra.program.model.symbol import SourceType
+from ghidra.util.task import ConsoleTaskMonitor
+from java.io import File
 
 
 def demangle_cpp_name(mangled_name):
