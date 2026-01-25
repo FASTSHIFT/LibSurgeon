@@ -1,304 +1,289 @@
 # LibSurgeon 🔬
 
+[![CI](https://github.com/YOUR_USERNAME/LibSurgeon/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/LibSurgeon/actions/workflows/ci.yml)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 **Static Library & ELF Dissector - Automated Reverse Engineering with Ghidra**
 
 LibSurgeon is a powerful automated tool that performs surgical extraction of C/C++ source code from static library archives and ELF binaries. It leverages Ghidra's advanced decompilation engine to reconstruct readable source code from compiled binaries.
 
-## Supported File Types
+## ✨ Features
+
+- 🔍 **Unified Processing**: One command processes ALL supported file types
+- 🔄 **Recursive Scanning**: Automatically finds all supported files in subdirectories
+- ⚡ **Parallel Processing**: Multi-threaded decompilation with configurable job count
+- 📊 **Quality Evaluation**: Automated decompilation quality assessment
+- 📁 **Organized Output**: Clean directory structure with sources, headers, and logs
+- 🧩 **Module Grouping**: Smart function grouping strategies for ELF files
+- 🎯 **Flexible Filtering**: Include/exclude patterns for targeted processing
+- 📝 **Documentation**: Auto-generated README and summary reports
+- 🐍 **Pure Python**: Main tools rewritten in Python for better portability
+
+## 📦 Supported File Types
 
 | Type | Extensions | Processing Method |
 |------|------------|-------------------|
 | **Archives** | `.a`, `.lib` | Extract `.o` files, then decompile each |
-| **ELF Files** | `.so`, `.elf`, `.axf`, `.out`, `.o` | Direct decompilation with module grouping |
+| **ELF Files** | `.so`, `.elf`, `.axf`, `.out`, `.o` | Direct decompilation |
 
-## Features
+## 🚀 Quick Start
 
-- 🔍 **Unified Processing**: One command processes ALL supported file types in a directory
-- 🔄 **Recursive Scanning**: Automatically finds all supported files in subdirectories
-- ⚡ **Parallel Processing**: Multi-threaded decompilation with configurable job count
-- 📊 **Progress Tracking**: Real-time progress display with ETA estimation
-- 📁 **Organized Output**: Clean directory structure with sources, headers, and logs
-- 🧩 **Module Grouping**: Smart function grouping by prefix, alphabet, or CamelCase patterns
-- 🎯 **Flexible Filtering**: Include/exclude patterns work across all file types
-- 📝 **Documentation**: Auto-generated README and summary reports
+### Installation
 
-## How It Works
+```bash
+# Clone the repository
+git clone https://github.com/YOUR_USERNAME/LibSurgeon.git
+cd LibSurgeon
 
-### Static Library Pipeline (.a files)
+# Install Python dependencies (optional, for development)
+pip install -r requirements-dev.txt
 
-```mermaid
-flowchart LR
-    A["📦 .a Archive<br/>(input)"] --> B["📂 Extract<br/>.o files"]
-    B --> C["🔬 Ghidra<br/>Decompile"]
-    C --> D["📄 .cpp Files<br/>(output)"]
+# Ensure Ghidra is installed
+# Download from: https://ghidra-sre.org/
 ```
 
-1. **Archive Extraction**: Uses `ar` to extract individual object files (`.o`) from the static library
-2. **Symbol Analysis**: Ghidra analyzes the ELF format, identifies functions, data structures, and cross-references
-3. **Decompilation**: Ghidra's decompiler translates machine code back to C/C++ pseudocode
-4. **Output Generation**: Each object file produces a corresponding `.cpp` source file
+### Requirements
 
-### ELF File Pipeline (.elf, .axf, .out, .so)
-
-```mermaid
-flowchart LR
-    A["📦 ELF File<br/>(input)"] --> B["🔍 Analyze<br/>Symbols"]
-    B --> C["🧩 Group by<br/>Module"]
-    C --> D["🔬 Ghidra<br/>Decompile"]
-    D --> E["📄 Module .cpp<br/>(output)"]
-```
-
-1. **Symbol Analysis**: Extracts function names and identifies naming patterns
-2. **Module Grouping**: Groups functions by prefix (e.g., `xxBmp*`, `xxFnt*`) or other strategies
-3. **Decompilation**: Each module is decompiled to a separate `.cpp` file
-4. **Index Generation**: Creates a function index with addresses for cross-referencing
-
-> **Note**: Shared libraries (`.so`) use the same pipeline as ELF executables. They are both ELF format files.
-
-## Requirements
-
+- **Python** 3.8 or later
 - **Ghidra** 11.0 or later (with analyzeHeadless support)
 - **Java** 17 or later (required by Ghidra)
-- **GNU Binutils** (for `ar` command)
-- **Bash** 4.0+ (for array support)
-- **Optional**: GNU Parallel (for improved multi-threading)
+- **GNU Binutils** (`ar` command for archive extraction)
 
-## Installation
-
-1. Clone or download this repository
-2. Ensure scripts are executable:
-   ```bash
-   chmod +x libsurgeon.sh ghidra_decompile.py ghidra_decompile_elf.py
-   ```
-3. Install Ghidra from https://ghidra-sre.org/
-
-## Usage
-
-### Basic Usage - Static Libraries
+### Basic Usage
 
 ```bash
-./libsurgeon.sh -g /path/to/ghidra <target_directory>
+# Process a static library
+python libsurgeon.py -g /path/to/ghidra libtouchgfx.a
+
+# Process all archives in a directory
+python libsurgeon.py -g /path/to/ghidra ./my_sdk/
+
+# With quality evaluation
+python libsurgeon.py -g /path/to/ghidra --evaluate library.a
+
+# Parallel processing (4 jobs)
+python libsurgeon.py -g /path/to/ghidra -j 4 ./libraries/
 ```
 
-### Basic Usage - ELF Files
+## 🛠️ Tools
+
+LibSurgeon includes several Python tools:
+
+### `libsurgeon.py` - Main CLI Tool
+
+The primary command-line interface for batch decompilation.
 
 ```bash
-./libsurgeon.sh -g /path/to/ghidra <elf_file>
+python libsurgeon.py -g /path/to/ghidra [options] <target>
+
+Options:
+  -g, --ghidra PATH     Path to Ghidra installation (REQUIRED)
+  -o, --output DIR      Output directory (default: ./libsurgeon_output)
+  -j, --jobs NUM        Number of parallel jobs (default: 1)
+  -i, --include PATTERN Only include matching files (repeatable)
+  -e, --exclude PATTERN Exclude matching files (repeatable)
+  --evaluate            Run quality evaluation after decompilation
+  --list                List file contents without decompiling
+  -c, --clean           Clean previous output before processing
 ```
 
-### Basic Usage - Shared Libraries
+### `batch_decompile.py` - Batch Decompilation
+
+Standalone batch decompiler for object files.
 
 ```bash
-./libsurgeon.sh -g /path/to/ghidra <shared_library.so>
+python batch_decompile.py -g /path/to/ghidra -i input.a -o output/
+python batch_decompile.py -g /path/to/ghidra -i extracted_dir/ -o output/ -j 4
 ```
 
-### Options
+### `evaluate_quality.py` - Quality Assessment
 
-| Option | Description |
-|--------|-------------|
-| `-g, --ghidra <path>` | Path to Ghidra installation (REQUIRED) |
-| `-o, --output <dir>` | Output directory (default: `./libsurgeon_output`) |
-| `-j, --jobs <num>` | Number of parallel jobs (default: auto) |
-| `-m, --module <strategy>` | Module grouping strategy for ELF: `prefix`, `alpha`, `camelcase`, `single` |
-| `-c, --clean` | Clean previous output before processing |
-| `-l, --list` | List archive/ELF contents without decompiling |
-| `-h, --help` | Show help message |
-
-### Module Grouping Strategies (ELF only)
-
-| Strategy | Description | Best For |
-|----------|-------------|----------|
-| `prefix` | Group by function prefix (e.g., `xxBmp*`, `GfxInit*`) | Libraries with consistent naming |
-| `alpha` | Group by first letter (A-Z) | Very large ELF files |
-| `camelcase` | Extract CamelCase words as module names | OOP-style code |
-| `single` | All functions in one file | Small ELF files |
-
-### Examples
+Analyze decompilation quality with detailed metrics.
 
 ```bash
-# Process ALL supported files in a directory (recursive)
-./libsurgeon.sh -g /opt/ghidra ./my_sdk/
-
-# Process a single file (auto-detect type)
-./libsurgeon.sh -g /opt/ghidra ./firmware.elf
-./libsurgeon.sh -g /opt/ghidra ./libfoo.a
-./libsurgeon.sh -g /opt/ghidra ./libbar.so
-
-# ELF module grouping strategies
-./libsurgeon.sh -g /opt/ghidra -m alpha ./firmware.elf           # Alphabetic
-./libsurgeon.sh -g /opt/ghidra -m camelcase ./firmware.axf       # CamelCase
-./libsurgeon.sh -g /opt/ghidra -m single ./app.out               # Single file
-
-# Filter files (works for ALL file types)
-./libsurgeon.sh -g /opt/ghidra -i "libgre*" ./sdk/               # Only libgre*
-./libsurgeon.sh -g /opt/ghidra -e "*test*" ./vendor/             # Exclude tests
-
-# List contents without decompiling
-./libsurgeon.sh -g /opt/ghidra --list ./my_sdk/
+python evaluate_quality.py ./decompiled_src/
+python evaluate_quality.py ./output/ --verbose
+python evaluate_quality.py ./output/ --json report.json
 ```
 
-## Output Structure
+**Quality Metrics:**
+- `halt_baddata`: Ghidra analysis failures (critical)
+- `undefined types`: Generic type placeholders
+- `excessive casts`: Complex pointer manipulations
+- `demangled names`: Successfully recovered C++ symbols
 
-### For Static Libraries (.a)
+**Quality Grades:**
+| Grade | Score | Description |
+|-------|-------|-------------|
+| A | 90+ | Excellent - highly readable |
+| B | 80+ | Good - minor issues |
+| C | 70+ | Fair - needs cleanup |
+| D | 50+ | Poor - significant issues |
+| F | <50 | Failed - mostly unusable |
+
+### `format.py` - Code Formatting
+
+Automatic code formatting and linting.
+
+```bash
+python format.py                    # Format all files
+python format.py --check            # Check without formatting
+python format.py --lint             # Run linters only
+```
+
+## 📊 Output Structure
 
 ```
 libsurgeon_output/
 ├── library_name/
-│   ├── src/              # Decompiled source (one .cpp per .o)
-│   │   ├── module1.cpp
-│   │   ├── module2.cpp
+│   ├── src/           # Decompiled C/C++ source files
+│   │   ├── Module1.cpp
+│   │   ├── Module2.cpp
 │   │   └── ...
-│   ├── include/          # Copied original headers
-│   ├── logs/             # Ghidra processing logs
-│   └── README.md
-└── SUMMARY.md
+│   ├── include/       # Header files (if found)
+│   ├── logs/          # Processing logs
+│   │   ├── ghidra_main.log
+│   │   └── failed_files.txt
+│   ├── quality_report.json  # Quality metrics (if --evaluate)
+│   └── README.md      # Library-specific documentation
+└── SUMMARY.md         # Overall processing summary
 ```
 
-### For ELF Files
+## 🧪 Testing
 
-```
-libsurgeon_output/
-├── firmware/
-│   ├── src/              # Decompiled source (grouped by module)
-│   │   ├── firmware_bitmap.cpp     # Bitmap functions
-│   │   ├── firmware_font.cpp       # Font functions
-│   │   ├── firmware_init.cpp       # Graphics init
-│   │   └── firmware_misc.cpp       # Ungrouped functions
-│   ├── logs/             # Ghidra processing logs
-│   ├── firmware_INDEX.md # Complete function index
-│   └── README.md
-└── SUMMARY.md
-```
-
-## Understanding the Output
-
-### Module Grouping Example
-
-For an ELF with functions like:
-- `xxBmpInit`, `xxBmpOpen`, `xxBmpClose`
-- `xxFntInit`, `xxFntGetMetrics`
-- `GfxCreateSurface`, `GfxDestroySurface`
-
-Using `prefix` strategy produces:
-- `firmware_bmp.cpp` - All Bmp* functions
-- `firmware_fnt.cpp` - All Fnt* functions  
-- `firmware_GfxCreate.cpp` - GfxCreate* functions
-- `firmware_GfxDestroy.cpp` - GfxDestroy* functions
-
-### Decompiled Code Characteristics
-
-```cpp
-// Original function names are preserved (if not stripped)
-void HAL_Init(void) {
-    // Local variables use auto-generated names
-    int local_10;
-    void *param_1;
-    
-    // Pointer arithmetic may appear verbose
-    *(int *)(param_1 + 0x10) = local_10;
-    
-    // Virtual calls appear as indirect function pointers
-    (**(code **)(*(int *)this + 0x1c))(this);
-}
-```
-
-### Tips for Analysis
-
-1. **Start with Headers**: Original headers provide class definitions and API documentation
-2. **Use the Index**: The `*_INDEX.md` file lists all functions with addresses
-3. **Identify Patterns**: Look for common patterns like vtables, constructors, and destructors
-4. **String References**: Search for string literals to understand functionality
-5. **Cross-Reference**: Use Ghidra GUI for interactive exploration of complex code
-
-## Customization
-
-### Changing Target Architecture
-
-Edit `libsurgeon.sh` to modify the processor specification:
+LibSurgeon includes a comprehensive test suite with code coverage support.
 
 ```bash
-# For different ARM variants
--processor "ARM:LE:32:Cortex"     # Cortex-M (default)
--processor "ARM:LE:32:v7"         # ARMv7
--processor "ARM:LE:32:v8"         # ARMv8 (32-bit)
+# Install test dependencies
+pip install pytest pytest-cov
 
-# For other architectures
--processor "x86:LE:32:default"    # x86 32-bit
--processor "x86:LE:64:default"    # x86-64
--processor "MIPS:LE:32:default"   # MIPS 32-bit
+# Build test fixtures
+cd tests && bash build_fixtures.sh && cd ..
+
+# Run tests
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=. --cov-report=html
+
+# View coverage report
+open htmlcov/index.html
 ```
 
-### Ghidra Script Customization
+## 🔧 Development
 
-The decompilation scripts can be modified:
-- `ghidra_decompile.py` - For .a archives (per-object file output)
-- `ghidra_decompile_elf.py` - For ELF files (module-grouped output)
+### Code Style
 
-Customization options:
-- Add custom analysis passes
-- Filter specific functions
-- Apply custom naming conventions
-- Export additional metadata
-- Adjust module grouping logic
+This project uses [black](https://github.com/psf/black) for code formatting and [isort](https://pycqa.github.io/isort/) for import sorting.
 
-## Troubleshooting
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Format code
+python format.py
+
+# Check formatting (CI mode)
+python format.py --check
+```
+
+### CI/CD
+
+GitHub Actions runs on every push and pull request:
+
+1. **Lint & Format Check**: black, isort, flake8
+2. **Unit Tests**: Python 3.8-3.12
+3. **Code Coverage**: Uploaded to Codecov
+4. **Integration Tests**: Full Ghidra pipeline (main branch only)
+
+## 📋 Examples
+
+### Decompile TouchGFX Library
+
+```bash
+# Extract and decompile ARM library
+python libsurgeon.py -g ~/ghidra_11.2.1_PUBLIC \
+    -o touchgfx_output \
+    --evaluate \
+    ./libtouchgfx.a
+
+# Check quality
+python evaluate_quality.py touchgfx_output/libtouchgfx/src/
+```
+
+### Process Multiple Libraries
+
+```bash
+# Process all .a files in SDK
+python libsurgeon.py -g /opt/ghidra \
+    -j 4 \
+    --evaluate \
+    ./vendor/sdk/lib/
+```
+
+### Filter Specific Libraries
+
+```bash
+# Only process libgre* libraries
+python libsurgeon.py -g /opt/ghidra \
+    -i "libgre*" \
+    ./vendor/
+
+# Exclude test libraries
+python libsurgeon.py -g /opt/ghidra \
+    -e "*test*" \
+    ./libraries/
+```
+
+## 🔍 Troubleshooting
 
 ### Common Issues
 
-| Issue | Solution |
-|-------|----------|
-| "Java not found" | Install Java 17+ and ensure it's in PATH |
-| "Ghidra headless not found" | Verify Ghidra path with `-g` option |
-| Empty output files | Check logs for analysis errors |
-| Memory issues | Reduce parallel jobs with `-j` option |
-| Wrong architecture | Modify `-processor` in the script |
+**"Ghidra analyzeHeadless not found"**
+- Ensure the path points to the Ghidra installation root directory
+- Verify `support/analyzeHeadless` exists in the Ghidra folder
 
-### Checking Logs
+**"Java not found" or version issues**
+- Install Java 17+ (required by Ghidra 11+)
+- Set `JAVA_HOME` environment variable
+
+**"ar command not found"**
+- Install GNU binutils: `apt install binutils` (Debian/Ubuntu)
+
+**High `halt_baddata` count**
+- This usually indicates Ghidra couldn't analyze the binary properly
+- Try using x86-64 libraries instead of ARM for better decompilation
+- ARM Thumb code is particularly challenging for decompilers
+
+### Debug Mode
+
+For troubleshooting, check the logs directory:
 
 ```bash
-# For static libraries
-cat libsurgeon_output/library/logs/module_ghidra.log
-cat libsurgeon_output/library/logs/failed_files.txt
+# View Ghidra logs
+cat libsurgeon_output/library_name/logs/ghidra_main.log
 
-# For ELF files
-cat libsurgeon_output/firmware/logs/ghidra_main.log
-cat libsurgeon_output/firmware/logs/ghidra_script.log
+# Check failed files
+cat libsurgeon_output/library_name/logs/failed_files.txt
 ```
 
-## Technical Details
+## 📜 License
 
-- **Target Architecture**: ARM Cortex-M (32-bit Little Endian) by default
-- **Decompiler**: Ghidra's native decompiler with full analysis
-- **Symbol Preservation**: Original function/variable names retained if not stripped
-- **Parallel Safety**: Each object file processed in isolated Ghidra project
-- **ELF Support**: Automatic detection via magic number (0x7f454c46)
+MIT License - see [LICENSE](LICENSE) for details.
 
-## Performance Tips
+## 🙏 Acknowledgments
 
-- **SSD Storage**: Significantly improves I/O-bound operations
-- **RAM**: Ghidra can use 2-4GB per instance; adjust `-j` accordingly
-- **GNU Parallel**: Install for better job scheduling than bash background processes
+- [Ghidra](https://ghidra-sre.org/) - NSA's Software Reverse Engineering Framework
+- [black](https://github.com/psf/black) - The uncompromising Python code formatter
 
-## Legal Disclaimer
+## ⚠️ Disclaimer
 
 This tool is intended for:
-- Educational purposes and learning
-- Security research and vulnerability analysis
-- Interoperability and compatibility testing
-- Recovery of lost source code (with proper authorization)
+- Educational purposes
+- Security research
+- Compatibility analysis
+- Legacy code recovery
 
-**Please respect software licenses and intellectual property rights.**
-
-Reverse engineering may be restricted in some jurisdictions. Ensure compliance with applicable laws and license agreements before use.
-
-## License
-
-MIT License - See LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
-
----
-
-*LibSurgeon - Precision extraction of knowledge from compiled code* 🔬
+Please respect software licenses and intellectual property rights. Only use this tool on binaries you have the legal right to analyze.

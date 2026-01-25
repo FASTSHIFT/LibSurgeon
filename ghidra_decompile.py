@@ -71,6 +71,52 @@ def extract_namespace(func_name):
     return None
 
 
+def should_skip_function(func):
+    """
+    Determine if a function should be skipped during decompilation.
+    Skips external symbols, thunks, and special sections that produce
+    garbage decompilation (halt_baddata).
+    """
+    func_name = func.getName()
+    
+    # Skip functions in EXTERNAL block (libc, libstdc++, etc.)
+    if func.isExternal():
+        return True
+    
+    # Skip thunk functions (jump stubs)
+    if func.isThunk():
+        return True
+    
+    # Skip functions with addresses in EXTERNAL memory block
+    addr = func.getEntryPoint()
+    mem = currentProgram.getMemory()
+    block = mem.getBlock(addr)
+    if block is not None:
+        block_name = block.getName()
+        # Skip EXTERNAL and .group.* sections
+        if block_name == "EXTERNAL" or block_name.startswith(".group"):
+            return True
+    
+    # Skip common libc/libstdc++ external function names
+    skip_patterns = [
+        "__stack_chk_fail",
+        "__assert_fail",
+        "__cxa_",
+        "__gxx_",
+        "operator delete",
+        "operator new",
+        "_Unwind_",
+        "__cxx_global_",
+        "_GLOBAL__",
+        "__static_initialization",
+    ]
+    for pattern in skip_patterns:
+        if pattern in func_name:
+            return True
+    
+    return False
+
+
 def main():
     print("=" * 60)
     print("LibSurgeon - Ghidra Decompilation Script")
@@ -119,9 +165,15 @@ def main():
     namespaces_found = set()
 
     func_count = 0
+    skipped_count = 0
     for func in functions:
         if monitor.isCancelled():
             break
+
+        # Skip external symbols and special sections
+        if should_skip_function(func):
+            skipped_count += 1
+            continue
 
         func_name = func.getName()
 
@@ -148,7 +200,8 @@ def main():
 
         func_count += 1
 
-    print("[Info] Found {} functions".format(func_count))
+    print("[Info] Found {} functions to decompile".format(func_count))
+    print("[Info] Skipped {} external/special functions".format(skipped_count))
     print("[Info] Found {} classes".format(len(class_functions)))
     if namespaces_found:
         print("[Info] Namespaces: {}".format(", ".join(sorted(namespaces_found))))
