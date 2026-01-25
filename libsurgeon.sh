@@ -283,7 +283,7 @@ Options:
   -o, --output <dir>      Output directory (default: ./libsurgeon_output)
   -j, --jobs <num>        Number of parallel jobs (default: $PARALLEL_JOBS)
   -m, --module <strategy> Module grouping strategy for ELF files:
-                            prefix    - Group by function prefix (EwBmp*, EwFnt*) [default]
+                            prefix    - Group by function prefix (xxBmp*, xxFnt*) [default]
                             alpha     - Group by first letter (A-Z)
                             camelcase - Group by CamelCase words
                             single    - All functions in one file
@@ -339,9 +339,9 @@ Output Structure:
     └── SUMMARY.md         # Overview report
 
 Module Grouping Strategies for ELF:
-  prefix     - Best for libraries with consistent naming (e.g., EwBmp*, GfxCreate*)
+  prefix     - Best for libraries with consistent naming (e.g., xxBmp*, GfxCreate*)
                Functions are grouped by their common prefix.
-               Example output: firmware_EwBmp.cpp, firmware_EwFnt.cpp
+               Example output: firmware_xxBmp.cpp, firmware_xxFnt.cpp
 
   alpha      - Simple A-Z grouping by first letter
                Useful for very large ELF files as a first pass
@@ -665,8 +665,8 @@ EOF
             cat >> "$readme_file" << 'EOF'
 Functions are grouped by their naming prefix. This works best for libraries
 with consistent naming conventions like:
-- EwBmp* (Bitmap functions) -> elf_name_EwBmp.cpp
-- EwFnt* (Font functions) -> elf_name_EwFnt.cpp
+- xxBmp* (Bitmap functions) -> elf_name_xxBmp.cpp
+- xxFnt* (Font functions) -> elf_name_xxFnt.cpp
 - GfxCreate* (Graphics creation) -> elf_name_GfxCreate.cpp
 EOF
         ;;

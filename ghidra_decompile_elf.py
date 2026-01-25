@@ -9,7 +9,7 @@ and decompile ELF files with intelligent module grouping.
 Functions with the same prefix are grouped into the same output file.
 
 Module Grouping Strategies:
-  - prefix: Group by function name prefix (e.g., EwBmp*, EwFnt*)
+  - prefix: Group by function name prefix (e.g., xxBmp*, xxFnt*)
   - alpha: Group by first letter (A-Z)
   - camelcase: Extract CamelCase words as module names
   - single: All functions in one file
@@ -197,8 +197,8 @@ def extract_prefix(func_name, min_prefix_len=2, max_prefix_len=30):
     Extract meaningful prefix from function name for grouping.
 
     Examples:
-        EwBmpInit -> EwBmp
-        EwFntGetMetrics -> EwFnt
+        xxBmpInit -> xxBmp
+        xxFntGetMetrics -> xxFnt
         GfxCreateSurface -> Gfx
         vg_lite_init -> vg_lite
         ApplicationApplication_goHome -> ApplicationApplication
@@ -234,7 +234,7 @@ def extract_prefix(func_name, min_prefix_len=2, max_prefix_len=30):
 
     # Handle pure CamelCase names
     # Find the first "word boundary" after initial capitals
-    # EwBmpInit -> EwBmp, CoreView -> Core
+    # xxBmpInit -> xxBmp, CoreView -> Core
     match = re.match(r"^([A-Z][a-z]+[A-Z][a-z]*)", func_name)
     if match:
         prefix = match.group(1)
