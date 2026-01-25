@@ -22,10 +22,8 @@ from unittest import mock
 
 import pytest
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Path setup is done in conftest.py
 
-from batch_decompile import extract_archive, validate_ghidra
 from evaluate_quality import (
     PATTERNS,
     FileMetrics,
@@ -36,6 +34,7 @@ from evaluate_quality import (
 from libsurgeon import (
     Colors,
     FileType,
+    extract_archive,
     format_time,
     get_file_type,
     is_archive_file,
