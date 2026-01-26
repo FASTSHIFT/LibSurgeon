@@ -275,7 +275,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 
-- [Ghidra](https://ghidra-sre.org/) - NSA's Software Reverse Engineering Framework
+- [Ghidra](https://github.com/NationalSecurityAgency/ghidra) - NSA's Software Reverse Engineering Framework
 - [black](https://github.com/psf/black) - The uncompromising Python code formatter
 
 ## ⚠️ Disclaimer
