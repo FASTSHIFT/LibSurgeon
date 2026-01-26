@@ -192,8 +192,15 @@ def analyze_file(filepath: str) -> FileMetrics:
     return metrics
 
 
-def analyze_directory(directory: str, file_pattern: str = "*.cpp") -> ProjectMetrics:
-    """Analyze all decompiled files in a directory"""
+def analyze_directory(directory: str, file_pattern: str = "*.c*") -> ProjectMetrics:
+    """
+    Analyze all decompiled files in a directory.
+
+    Args:
+        directory: Directory containing decompiled source files
+        file_pattern: Glob pattern for files to analyze.
+                      Default "*.c*" matches both *.c and *.cpp files.
+    """
     project = ProjectMetrics(directory=directory)
 
     # Find all matching files
@@ -417,8 +424,8 @@ Examples:
     parser.add_argument(
         "-p",
         "--pattern",
-        default="*.cpp",
-        help="File pattern to match (default: *.cpp)",
+        default="*.c*",
+        help="File pattern to match (default: *.c* matches both .c and .cpp)",
     )
 
     args = parser.parse_args()

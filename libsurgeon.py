@@ -247,6 +247,85 @@ def is_archive_file(filepath: str) -> bool:
         return False
 
 
+# ELF machine type to Ghidra processor mapping
+# ELF e_machine values: https://refspecs.linuxfoundation.org/elf/gabi4+/ch4.eheader.html
+ELF_MACHINE_MAP = {
+    0x03: ("x86:LE:32:default", "gcc"),  # EM_386 - Intel 80386
+    0x3E: ("x86:LE:64:default", "gcc"),  # EM_X86_64 - AMD x86-64
+    0x28: ("ARM:LE:32:v7", "default"),  # EM_ARM - ARM 32-bit
+    0xB7: ("AARCH64:LE:64:v8A", "default"),  # EM_AARCH64 - ARM 64-bit
+    0x08: ("MIPS:BE:32:default", "default"),  # EM_MIPS - MIPS
+    0x14: ("PowerPC:BE:32:default", "default"),  # EM_PPC - PowerPC
+    0x15: ("PowerPC:BE:64:default", "default"),  # EM_PPC64 - PowerPC 64-bit
+    0xF3: ("RISCV:LE:32:RV32GC", "default"),  # EM_RISCV - RISC-V
+    0x2B: ("Sparc:BE:32:default", "default"),  # EM_SPARC - SPARC
+    0x32: ("IA64:LE:64:default", "default"),  # EM_IA_64 - Intel IA-64
+    0x53: ("AVR8:LE:16:atmega256", "default"),  # EM_AVR - Atmel AVR
+    0x5E: ("Xtensa:LE:32:default", "default"),  # EM_XTENSA - Tensilica Xtensa
+}
+
+
+def detect_elf_architecture(filepath: str) -> Optional[tuple]:
+    """
+    Detect ELF file architecture by reading ELF header.
+
+    Returns:
+        Tuple of (processor_id, compiler_spec) for Ghidra, or None if detection fails
+    """
+    try:
+        with open(filepath, "rb") as f:
+            magic = f.read(4)
+            if magic != b"\x7fELF":
+                return None
+
+            # ELF class (32/64 bit)
+            ei_class = ord(f.read(1))
+            is_64bit = ei_class == 2
+
+            # ELF data encoding (endianness)
+            ei_data = ord(f.read(1))
+            is_little_endian = ei_data == 1
+
+            # Skip to e_machine field (offset 18 for 32-bit, 18 for 64-bit)
+            f.seek(18)
+            machine_bytes = f.read(2)
+
+            if is_little_endian:
+                e_machine = int.from_bytes(machine_bytes, "little")
+            else:
+                e_machine = int.from_bytes(machine_bytes, "big")
+
+            # Look up in our mapping
+            if e_machine in ELF_MACHINE_MAP:
+                processor, cspec = ELF_MACHINE_MAP[e_machine]
+                # Adjust for endianness and bitness if needed
+                if e_machine == 0x28:  # ARM
+                    # ARM can be LE or BE
+                    endian = "LE" if is_little_endian else "BE"
+                    processor = f"ARM:{endian}:32:v7"
+                elif e_machine == 0xB7:  # AARCH64
+                    endian = "LE" if is_little_endian else "BE"
+                    processor = f"AARCH64:{endian}:64:v8A"
+                elif e_machine == 0xF3:  # RISC-V
+                    endian = "LE" if is_little_endian else "BE"
+                    bits = "64" if is_64bit else "32"
+                    variant = "RV64GC" if is_64bit else "RV32GC"
+                    processor = f"RISCV:{endian}:{bits}:{variant}"
+                elif e_machine == 0x08:  # MIPS
+                    endian = "LE" if is_little_endian else "BE"
+                    bits = "64" if is_64bit else "32"
+                    processor = f"MIPS:{endian}:{bits}:default"
+                return (processor, cspec)
+
+            # Unknown architecture, return None to let Ghidra auto-detect
+            log_warn(f"Unknown ELF machine type: 0x{e_machine:02X}")
+            return None
+
+    except (IOError, OSError) as e:
+        log_warn(f"Failed to detect ELF architecture: {e}")
+        return None
+
+
 # ============================================================
 # File Scanning
 # ============================================================
@@ -404,9 +483,22 @@ def decompile_object_file(
     project_dir: str,
     skip_existing: bool = True,
     timeout: int = 300,
+    processor: Optional[str] = None,
+    cspec: Optional[str] = None,
 ) -> DecompileResult:
     """
     Decompile a single object file using Ghidra Headless mode.
+
+    Args:
+        obj_file: Path to the object file to decompile
+        output_dir: Directory to write decompiled output
+        ghidra_headless: Path to Ghidra analyzeHeadless
+        decompile_script: Path to the Ghidra decompile script
+        project_dir: Directory for temporary Ghidra projects
+        skip_existing: Skip if output file already exists
+        timeout: Timeout in seconds for Ghidra processing
+        processor: Ghidra processor ID (e.g., "ARM:LE:32:v7")
+        cspec: Ghidra compiler spec (e.g., "default", "gcc")
     """
     basename = os.path.splitext(os.path.basename(obj_file))[0]
     output_file = os.path.join(output_dir, f"{basename}.cpp")
@@ -434,11 +526,22 @@ def decompile_object_file(
             proj_name,
             "-import",
             obj_file,
-            "-postScript",
-            decompile_script,
-            output_dir,
-            "-deleteProject",
         ]
+
+        # Add processor and compiler spec if specified
+        if processor:
+            cmd.extend(["-processor", processor])
+        if cspec:
+            cmd.extend(["-cspec", cspec])
+
+        cmd.extend(
+            [
+                "-postScript",
+                decompile_script,
+                output_dir,
+                "-deleteProject",
+            ]
+        )
 
         subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
@@ -517,6 +620,18 @@ def process_archive(
         total = len(obj_files)
 
         log_info(f"Found {total} object files")
+
+        # Detect architecture from first object file
+        processor = None
+        cspec = None
+        if obj_files:
+            arch_info = detect_elf_architecture(obj_files[0])
+            if arch_info:
+                processor, cspec = arch_info
+                log_info(f"Detected architecture: {processor}")
+            else:
+                log_warn("Could not detect architecture, using Ghidra auto-detection")
+
         print()  # Space for progress bar
         print()
 
@@ -565,6 +680,8 @@ def process_archive(
                     decompile_script,
                     project_dir,
                     skip_existing,
+                    processor=processor,
+                    cspec=cspec,
                 )
 
                 update_batch_result(result, basename)
@@ -581,6 +698,8 @@ def process_archive(
                         decompile_script,
                         project_dir,
                         skip_existing,
+                        processor=processor,
+                        cspec=cspec,
                     )
                     futures[future] = obj_file
 

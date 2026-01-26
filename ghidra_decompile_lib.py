@@ -10,6 +10,12 @@ For ELF file processing, use ghidra_decompile_elf.py instead.
 """
 
 import os
+import sys
+
+# Add the script's directory to Python path for importing ghidra_common
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
 
 # Ghidra Python scripts use Jython with Ghidra's API
 from ghidra.app.decompiler import DecompInterface
