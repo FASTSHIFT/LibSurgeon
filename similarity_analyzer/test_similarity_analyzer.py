@@ -16,15 +16,15 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from similarity_analyzer import (  # noqa: E402
-    normalize_code,
-    calc_similarity,
-    load_file,
-    compare_pair,
-    group_by_pattern,
-    analyze_group,
-    format_time,
-    FileData,
     DEFAULT_VARIANTS,
+    FileData,
+    analyze_group,
+    calc_similarity,
+    compare_pair,
+    format_time,
+    group_by_pattern,
+    load_file,
+    normalize_code,
 )
 
 
@@ -167,18 +167,18 @@ class TestGroupByPattern(unittest.TestCase):
     def test_groups_by_suffix_pattern(self):
         """Files with common patterns should be grouped."""
         files = ["Painter_RGB565.cpp", "Painter_RGB888.cpp", "Painter_ARGB.cpp"]
-        patterns = [(r'^(\w+)_(\w+)\.cpp$', 'Painter_*')]
+        patterns = [(r"^(\w+)_(\w+)\.cpp$", "Painter_*")]
 
         groups, ungrouped = group_by_pattern(files, patterns)
 
-        self.assertIn('Painter_*', groups)
-        self.assertEqual(len(groups['Painter_*']), 3)
+        self.assertIn("Painter_*", groups)
+        self.assertEqual(len(groups["Painter_*"]), 3)
         self.assertEqual(len(ungrouped), 0)
 
     def test_single_file_not_grouped(self):
         """Single matching file should not form a group."""
         files = ["Painter_RGB565.cpp", "Other.cpp"]
-        patterns = [(r'^(\w+)_(\w+)\.cpp$', 'Painter_*')]
+        patterns = [(r"^(\w+)_(\w+)\.cpp$", "Painter_*")]
 
         groups, ungrouped = group_by_pattern(files, patterns)
 
@@ -187,7 +187,7 @@ class TestGroupByPattern(unittest.TestCase):
     def test_unmatched_files(self):
         """Unmatched files should be in ungrouped."""
         files = ["random.cpp", "other.hpp"]
-        patterns = [(r'^Painter_(\w+)\.cpp$', 'Painter_*')]
+        patterns = [(r"^Painter_(\w+)\.cpp$", "Painter_*")]
 
         groups, ungrouped = group_by_pattern(files, patterns)
 
@@ -201,11 +201,11 @@ class TestAnalyzeGroup(unittest.TestCase):
     def test_analyze_similar_group(self):
         """Similar files should have high average similarity."""
         file_data = {
-            'a.cpp': FileData('a.cpp', 100, 'hello world code'),
-            'b.cpp': FileData('b.cpp', 100, 'hello world code'),
+            "a.cpp": FileData("a.cpp", 100, "hello world code"),
+            "b.cpp": FileData("b.cpp", 100, "hello world code"),
         }
 
-        result = analyze_group(['a.cpp', 'b.cpp'], file_data)
+        result = analyze_group(["a.cpp", "b.cpp"], file_data)
 
         self.assertEqual(len(result.files), 2)
         self.assertEqual(result.avg_similarity, 1.0)
@@ -214,11 +214,11 @@ class TestAnalyzeGroup(unittest.TestCase):
     def test_analyze_dissimilar_group(self):
         """Dissimilar files should have low average similarity."""
         file_data = {
-            'a.cpp': FileData('a.cpp', 100, 'aaaaaaaaaa'),
-            'b.cpp': FileData('b.cpp', 100, 'bbbbbbbbbb'),
+            "a.cpp": FileData("a.cpp", 100, "aaaaaaaaaa"),
+            "b.cpp": FileData("b.cpp", 100, "bbbbbbbbbb"),
         }
 
-        result = analyze_group(['a.cpp', 'b.cpp'], file_data)
+        result = analyze_group(["a.cpp", "b.cpp"], file_data)
 
         self.assertLess(result.avg_similarity, 0.3)
 
@@ -233,11 +233,11 @@ class TestAnalyzeGroup(unittest.TestCase):
     def test_skips_error_files(self):
         """Files with errors should be skipped."""
         file_data = {
-            'a.cpp': FileData('a.cpp', 100, 'hello'),
-            'b.cpp': FileData('b.cpp', 0, '', error='File not found'),
+            "a.cpp": FileData("a.cpp", 100, "hello"),
+            "b.cpp": FileData("b.cpp", 0, "", error="File not found"),
         }
 
-        result = analyze_group(['a.cpp', 'b.cpp'], file_data)
+        result = analyze_group(["a.cpp", "b.cpp"], file_data)
 
         self.assertEqual(len(result.files), 1)
 
@@ -270,7 +270,8 @@ class TestIntegration(unittest.TestCase):
             # Create similar files
             for name in ["DrawerRGB565.cpp", "DrawerRGB888.cpp"]:
                 path = Path(tmpdir) / name
-                path.write_text(f"""/**
+                path.write_text(
+                    f"""/**
  * Auto-generated file
  */
 class {Path(name).stem} {{
@@ -281,13 +282,15 @@ class {Path(name).stem} {{
         }}
     }}
 }};
-""")
+"""
+                )
 
             # Create a different file
             (Path(tmpdir) / "Other.cpp").write_text("completely different content here")
 
             # Load files
             from multiprocessing import Pool
+
             files = ["DrawerRGB565.cpp", "DrawerRGB888.cpp", "Other.cpp"]
 
             with Pool(2) as pool:
@@ -299,17 +302,17 @@ class {Path(name).stem} {{
             # Similar files should have high similarity
             sim = calc_similarity(
                 file_data["DrawerRGB565.cpp"].normalized,
-                file_data["DrawerRGB888.cpp"].normalized
+                file_data["DrawerRGB888.cpp"].normalized,
             )
             self.assertGreater(sim, 0.9)
 
             # Different file should have low similarity
             sim_diff = calc_similarity(
                 file_data["DrawerRGB565.cpp"].normalized,
-                file_data["Other.cpp"].normalized
+                file_data["Other.cpp"].normalized,
             )
             self.assertLess(sim_diff, 0.5)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main(verbosity=2)

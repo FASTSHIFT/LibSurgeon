@@ -22,21 +22,22 @@ Examples:
     python similarity_analyzer.py ./src -p -w 8 --ext .c .h
 """
 
+import argparse
 import re
 import sys
 import time
-import argparse
-from pathlib import Path
 from collections import defaultdict
-from typing import List, Dict, Tuple, Optional
-from multiprocessing import Pool, cpu_count
 from dataclasses import dataclass
+from multiprocessing import Pool, cpu_count
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 __version__ = "1.0.0"
 
 # High-performance similarity library
 try:
     from rapidfuzz import fuzz
+
     HAS_RAPIDFUZZ = True
 except ImportError:
     HAS_RAPIDFUZZ = False
@@ -44,23 +45,36 @@ except ImportError:
 
 # Default filename patterns for grouping
 DEFAULT_PATTERNS = [
-    (r'^(\w+)_(\w+)\.(?:cpp|c|h|hpp)$', '*_variant'),
-    (r'^(\w+)(\d+)\.(?:cpp|c|h|hpp)$', '*N'),
+    (r"^(\w+)_(\w+)\.(?:cpp|c|h|hpp)$", "*_variant"),
+    (r"^(\w+)(\d+)\.(?:cpp|c|h|hpp)$", "*N"),
 ]
 
 # Common variant keywords to normalize
 DEFAULT_VARIANTS = [
-    'RGB565', 'RGB888', 'ARGB8888', 'XRGB8888',
-    'RGBA', 'BGRA', 'ARGB', 'ABGR',
-    'GRAY2', 'GRAY4', 'GRAY8',
-    '8bpp', '16bpp', '24bpp', '32bpp',
-    'L8', 'BW',
+    "RGB565",
+    "RGB888",
+    "ARGB8888",
+    "XRGB8888",
+    "RGBA",
+    "BGRA",
+    "ARGB",
+    "ABGR",
+    "GRAY2",
+    "GRAY4",
+    "GRAY8",
+    "8bpp",
+    "16bpp",
+    "24bpp",
+    "32bpp",
+    "L8",
+    "BW",
 ]
 
 
 @dataclass
 class FileData:
     """Container for file analysis data."""
+
     filename: str
     lines: int
     normalized: str
@@ -70,6 +84,7 @@ class FileData:
 @dataclass
 class SimilarityResult:
     """Result of similarity comparison."""
+
     file1: str
     file2: str
     similarity: float
@@ -78,6 +93,7 @@ class SimilarityResult:
 @dataclass
 class GroupAnalysis:
     """Analysis result for a file group."""
+
     name: str
     files: List[str]
     line_counts: Dict[str, int]
@@ -105,18 +121,18 @@ def normalize_code(content: str, filename: str, variants: List[str] = None) -> s
         variants = DEFAULT_VARIANTS
 
     # Remove block comments at start
-    content = re.sub(r'^/\*\*.*?\*/', '', content, count=1, flags=re.DOTALL)
+    content = re.sub(r"^/\*\*.*?\*/", "", content, count=1, flags=re.DOTALL)
 
     # Replace class name from filename
     stem = Path(filename).stem
-    content = content.replace(stem, 'CLASS_NAME')
+    content = content.replace(stem, "CLASS_NAME")
 
     # Replace variant keywords
     for variant in variants:
-        content = re.sub(rf'\b{variant}\b', 'VARIANT', content, flags=re.IGNORECASE)
+        content = re.sub(rf"\b{variant}\b", "VARIANT", content, flags=re.IGNORECASE)
 
     # Compress whitespace
-    content = re.sub(r'\s+', ' ', content)
+    content = re.sub(r"\s+", " ", content)
 
     # Limit length for performance
     return content[:50000]
@@ -155,15 +171,15 @@ def load_file(args: Tuple[Path, str, List[str]]) -> FileData:
     filepath = src_dir / filename
 
     try:
-        content = filepath.read_text(errors='ignore')
+        content = filepath.read_text(errors="ignore")
         normalized = normalize_code(content, filename, variants)
         return FileData(
             filename=filename,
-            lines=len(content.split('\n')),
+            lines=len(content.split("\n")),
             normalized=normalized,
         )
     except Exception as e:
-        return FileData(filename=filename, lines=0, normalized='', error=str(e))
+        return FileData(filename=filename, lines=0, normalized="", error=str(e))
 
 
 def compare_pair(args: Tuple[str, str, str, str, float]) -> Optional[SimilarityResult]:
@@ -191,7 +207,9 @@ def compare_pair(args: Tuple[str, str, str, str, float]) -> Optional[SimilarityR
     return None
 
 
-def group_by_pattern(files: List[str], patterns: List[Tuple[str, str]] = None) -> Tuple[Dict[str, List[str]], List[str]]:
+def group_by_pattern(
+    files: List[str], patterns: List[Tuple[str, str]] = None
+) -> Tuple[Dict[str, List[str]], List[str]]:
     """
     Group files by filename patterns.
 
@@ -237,8 +255,12 @@ def analyze_group(files: List[str], file_data: Dict[str, FileData]) -> GroupAnal
 
     if len(file_list) < 2:
         return GroupAnalysis(
-            name='', files=file_list, line_counts={},
-            avg_similarity=0, total_lines=0, similarities=[]
+            name="",
+            files=file_list,
+            line_counts={},
+            avg_similarity=0,
+            total_lines=0,
+            similarities=[],
         )
 
     # Calculate pairwise similarities
@@ -246,17 +268,14 @@ def analyze_group(files: List[str], file_data: Dict[str, FileData]) -> GroupAnal
     for i in range(len(file_list)):
         for j in range(i + 1, len(file_list)):
             f1, f2 = file_list[i], file_list[j]
-            sim = calc_similarity(
-                file_data[f1].normalized,
-                file_data[f2].normalized
-            )
+            sim = calc_similarity(file_data[f1].normalized, file_data[f2].normalized)
             similarities.append((f1, f2, sim))
 
     avg_sim = sum(s[2] for s in similarities) / len(similarities) if similarities else 0
     line_counts = {f: file_data[f].lines for f in file_list}
 
     return GroupAnalysis(
-        name='',
+        name="",
         files=file_list,
         line_counts=line_counts,
         avg_similarity=avg_sim,
@@ -269,7 +288,7 @@ def find_similar_pairs(
     file_data: Dict[str, FileData],
     threshold: float,
     num_workers: int,
-    show_progress: bool = True
+    show_progress: bool = True,
 ) -> List[SimilarityResult]:
     """
     Find all similar file pairs using multiprocessing.
@@ -299,12 +318,9 @@ def find_similar_pairs(
             if lines2 > lines1 * 2:
                 break
 
-            pairs.append((
-                f1, f2,
-                file_data[f1].normalized,
-                file_data[f2].normalized,
-                threshold
-            ))
+            pairs.append(
+                (f1, f2, file_data[f1].normalized, file_data[f2].normalized, threshold)
+            )
 
     if show_progress:
         print(f"   Comparing: {len(pairs)} pairs")
@@ -320,7 +336,9 @@ def find_similar_pairs(
         total = len(pairs)
         chunk_size = max(1, total // 100)
 
-        for i, result in enumerate(pool.imap_unordered(compare_pair, pairs, chunksize=chunk_size)):
+        for i, result in enumerate(
+            pool.imap_unordered(compare_pair, pairs, chunksize=chunk_size)
+        ):
             if result:
                 results.append(result)
 
@@ -333,10 +351,12 @@ def find_similar_pairs(
 
                 bar_len = 30
                 filled = int(bar_len * percent)
-                bar = '█' * filled + '░' * (bar_len - filled)
+                bar = "█" * filled + "░" * (bar_len - filled)
 
-                sys.stdout.write(f"\r   Progress: [{bar}] {i+1}/{total} ({percent:.0%}) | "
-                                 f"{elapsed:.1f}s < {eta:.1f}s | {speed:.0f}/s  ")
+                sys.stdout.write(
+                    f"\r   Progress: [{bar}] {i+1}/{total} ({percent:.0%}) | "
+                    f"{elapsed:.1f}s < {eta:.1f}s | {speed:.0f}/s  "
+                )
                 sys.stdout.flush()
 
     if show_progress:
@@ -358,23 +378,44 @@ def format_time(seconds: float) -> str:
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='Fast code similarity detection tool',
+        description="Fast code similarity detection tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
-    parser.add_argument('src_dir', help='Source directory to analyze')
-    parser.add_argument('--impl-dir', '-i', help='Implementation directory (to check which files exist)')
-    parser.add_argument('--threshold', '-t', type=float, default=0.80,
-                        help='Similarity threshold (0.0-1.0), default: 0.80')
-    parser.add_argument('--find-pairs', '-p', action='store_true',
-                        help='Find all similar file pairs globally')
-    parser.add_argument('--workers', '-w', type=int, default=0,
-                        help='Number of worker processes (0=auto)')
-    parser.add_argument('--ext', nargs='+', default=['.cpp', '.c', '.h', '.hpp'],
-                        help='File extensions to analyze')
-    parser.add_argument('--quiet', '-q', action='store_true',
-                        help='Minimal output')
-    parser.add_argument('--version', '-v', action='version', version=f'%(prog)s {__version__}')
+    parser.add_argument("src_dir", help="Source directory to analyze")
+    parser.add_argument(
+        "--impl-dir", "-i", help="Implementation directory (to check which files exist)"
+    )
+    parser.add_argument(
+        "--threshold",
+        "-t",
+        type=float,
+        default=0.80,
+        help="Similarity threshold (0.0-1.0), default: 0.80",
+    )
+    parser.add_argument(
+        "--find-pairs",
+        "-p",
+        action="store_true",
+        help="Find all similar file pairs globally",
+    )
+    parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=0,
+        help="Number of worker processes (0=auto)",
+    )
+    parser.add_argument(
+        "--ext",
+        nargs="+",
+        default=[".cpp", ".c", ".h", ".hpp"],
+        help="File extensions to analyze",
+    )
+    parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")
+    parser.add_argument(
+        "--version", "-v", action="version", version=f"%(prog)s {__version__}"
+    )
 
     args = parser.parse_args()
 
@@ -400,18 +441,20 @@ def main():
     # Find all matching files
     all_files = []
     for ext in args.ext:
-        all_files.extend(f.name for f in src_dir.glob(f'*{ext}'))
+        all_files.extend(f.name for f in src_dir.glob(f"*{ext}"))
     all_files = list(set(all_files))
 
     implemented = set()
     if impl_dir and impl_dir.exists():
         for ext in args.ext:
-            implemented.update(f.name for f in impl_dir.glob(f'*{ext}'))
+            implemented.update(f.name for f in impl_dir.glob(f"*{ext}"))
 
     impl_count = sum(1 for f in all_files if f in implemented)
 
     if not args.quiet:
-        print(f"\nFiles: {len(all_files)} (implemented: {impl_count}, {impl_count*100//max(1,len(all_files))}%)")
+        print(
+            f"\nFiles: {len(all_files)} (implemented: {impl_count}, {impl_count*100//max(1,len(all_files))}%)"
+        )
 
     # Load all files
     if not args.quiet:
@@ -445,17 +488,27 @@ def main():
         not_impl = [f for f in result.files if f not in implemented]
 
         if result.avg_similarity >= args.threshold:
-            template_candidates.append({
-                'group': group_name,
-                'result': result,
-                'implemented': impl_files,
-                'not_implemented': not_impl
-            })
+            template_candidates.append(
+                {
+                    "group": group_name,
+                    "result": result,
+                    "implemented": impl_files,
+                    "not_implemented": not_impl,
+                }
+            )
 
         if not args.quiet:
-            icon = "✅" if result.avg_similarity >= 0.9 else ("🔶" if result.avg_similarity >= 0.7 else "❌")
-            print(f"\n{icon} {group_name} ({len(files)} files, {result.avg_similarity:.0%} similar)")
-            print(f"   Lines: {result.total_lines} | Impl: {len(impl_files)}, Not: {len(not_impl)}")
+            icon = (
+                "✅"
+                if result.avg_similarity >= 0.9
+                else ("🔶" if result.avg_similarity >= 0.7 else "❌")
+            )
+            print(
+                f"\n{icon} {group_name} ({len(files)} files, {result.avg_similarity:.0%} similar)"
+            )
+            print(
+                f"   Lines: {result.total_lines} | Impl: {len(impl_files)}, Not: {len(not_impl)}"
+            )
 
             for f in sorted(result.files):
                 status = "✓" if f in implemented else "○"
@@ -468,15 +521,19 @@ def main():
         print(f"Template Candidates (similarity >= {args.threshold:.0%})")
         print("=" * 70)
 
-        for item in sorted(template_candidates, key=lambda x: -x['result'].avg_similarity):
-            not_impl = item['not_implemented']
+        for item in sorted(
+            template_candidates, key=lambda x: -x["result"].avg_similarity
+        ):
+            not_impl = item["not_implemented"]
             if not not_impl:
                 continue
 
-            result = item['result']
+            result = item["result"]
             savings = result.total_lines - result.total_lines // len(result.files)
 
-            print(f"\n📦 {item['group']} ({result.avg_similarity:.0%}, saves ~{savings} lines)")
+            print(
+                f"\n📦 {item['group']} ({result.avg_similarity:.0%}, saves ~{savings} lines)"
+            )
             for f in not_impl:
                 print(f"     ○ {f}")
 
@@ -487,14 +544,20 @@ def main():
             print(f"Global Similar File Search (threshold >= {args.threshold:.0%})")
             print("=" * 70)
 
-        pairs = find_similar_pairs(file_data, args.threshold, num_workers, not args.quiet)
+        pairs = find_similar_pairs(
+            file_data, args.threshold, num_workers, not args.quiet
+        )
 
         # Filter already-grouped files
         grouped_files = set()
         for files in groups.values():
             grouped_files.update(files)
 
-        new_pairs = [p for p in pairs if p.file1 not in grouped_files or p.file2 not in grouped_files]
+        new_pairs = [
+            p
+            for p in pairs
+            if p.file1 not in grouped_files or p.file2 not in grouped_files
+        ]
 
         if not args.quiet and new_pairs:
             print(f"\nFound {len(new_pairs)} additional similar pairs:")
@@ -511,19 +574,32 @@ def main():
         print("Summary")
         print("=" * 70)
 
-        total_template_files = sum(len(item['result'].files) for item in template_candidates)
-        total_template_lines = sum(item['result'].total_lines for item in template_candidates)
-        potential_savings = sum(
-            item['result'].total_lines - item['result'].total_lines // len(item['result'].files)
-            for item in template_candidates
-        ) if template_candidates else 0
+        total_template_files = sum(
+            len(item["result"].files) for item in template_candidates
+        )
+        total_template_lines = sum(
+            item["result"].total_lines for item in template_candidates
+        )
+        potential_savings = (
+            sum(
+                item["result"].total_lines
+                - item["result"].total_lines // len(item["result"].files)
+                for item in template_candidates
+            )
+            if template_candidates
+            else 0
+        )
 
-        print(f"  Template candidates: {len(template_candidates)} groups, {total_template_files} files")
+        print(
+            f"  Template candidates: {len(template_candidates)} groups, {total_template_files} files"
+        )
         if total_template_lines > 0:
-            print(f"  Potential savings: ~{potential_savings} lines ({potential_savings * 100 // total_template_lines}%)")
+            print(
+                f"  Potential savings: ~{potential_savings} lines ({potential_savings * 100 // total_template_lines}%)"
+            )
 
         print(f"\n⏱️  Total time: {format_time(time.time() - total_start)}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

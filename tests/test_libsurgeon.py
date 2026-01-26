@@ -19,8 +19,6 @@ import tempfile
 
 import pytest
 
-# Path setup is done in conftest.py
-
 from evaluate_quality import (
     PATTERNS,
     FileMetrics,
@@ -28,9 +26,9 @@ from evaluate_quality import (
     analyze_file,
 )
 from libsurgeon import (
+    MODULE_STRATEGIES,
     Colors,
     FileType,
-    MODULE_STRATEGIES,
     draw_progress_bar,
     extract_archive,
     format_time,
@@ -41,6 +39,9 @@ from libsurgeon import (
     show_progress,
     show_progress_final,
 )
+
+# Path setup is done in conftest.py
+
 
 # ============================================================
 # Fixtures

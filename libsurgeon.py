@@ -163,7 +163,9 @@ def show_progress(
 
     # Show current file
     if filename:
-        print(f"{Colors.DIM}  -> Completed: {Colors.NC}{Colors.GREEN}{filename}{Colors.NC}")
+        print(
+            f"{Colors.DIM}  -> Completed: {Colors.NC}{Colors.GREEN}{filename}{Colors.NC}"
+        )
     else:
         print(f"{Colors.DIM}  -> Processing...{Colors.NC}")
 
@@ -176,7 +178,9 @@ def show_progress_final(total: int, elapsed: int):
     bar = draw_progress_bar(total, total)
     print(f"\r\033[K\n\033[K\n", end="")
     print("\033[2A", end="")
-    print(f"{Colors.GREEN}[{bar}]{Colors.NC} {Colors.BOLD}100%{Colors.NC} ({total}/{total}) | Total: {format_time(elapsed)}")
+    print(
+        f"{Colors.GREEN}[{bar}]{Colors.NC} {Colors.BOLD}100%{Colors.NC} ({total}/{total}) | Total: {format_time(elapsed)}"
+    )
     print()
 
 
@@ -787,11 +791,17 @@ def process_elf_file(
                             if current_func > 0:
                                 avg_time = elapsed / current_func
                                 eta = int((total_funcs - current_func) * avg_time)
-                            show_progress(current_func, total_funcs, elapsed, last_func_name, eta)
+                            show_progress(
+                                current_func, total_funcs, elapsed, last_func_name, eta
+                            )
                     except:
                         pass
                 elif "ANALYZING" in line and not analysis_done:
-                    print(f"\r{Colors.DIM}  Ghidra analyzing...{Colors.NC}", end="", flush=True)
+                    print(
+                        f"\r{Colors.DIM}  Ghidra analyzing...{Colors.NC}",
+                        end="",
+                        flush=True,
+                    )
 
             process.wait()
 
@@ -837,7 +847,11 @@ def process_elf_file(
     result.duration = time.time() - start_time
 
     if result.success:
-        h_count = len(list(Path(include_dir).glob("*.h"))) if os.path.isdir(include_dir) else 0
+        h_count = (
+            len(list(Path(include_dir).glob("*.h")))
+            if os.path.isdir(include_dir)
+            else 0
+        )
 
         print()
         log_info(f"{Colors.GREEN}ELF Processing Complete{Colors.NC}")
@@ -862,7 +876,9 @@ def process_elf_file(
                 print(f"     - {name} ({lines} lines)")
 
             if result.module_count > 10:
-                print(f"     {Colors.DIM}... and {result.module_count - 10} more modules{Colors.NC}")
+                print(
+                    f"     {Colors.DIM}... and {result.module_count - 10} more modules{Colors.NC}"
+                )
             print()
 
         # Generate README
@@ -896,15 +912,21 @@ def generate_elf_readme(name: str, output_dir: str, strategy: str, result: ElfRe
         f.write(f"## Module Grouping Strategy: {strategy}\n\n")
 
         if strategy == "prefix":
-            f.write("Functions are grouped by their naming prefix. This works best for libraries\n")
+            f.write(
+                "Functions are grouped by their naming prefix. This works best for libraries\n"
+            )
             f.write("with consistent naming conventions like:\n")
             f.write("- xxBmp* (Bitmap functions) -> elf_name_xxBmp.cpp\n")
             f.write("- xxFnt* (Font functions) -> elf_name_xxFnt.cpp\n\n")
         elif strategy == "alpha":
-            f.write("Functions are grouped alphabetically (A-Z). Useful for very large\n")
+            f.write(
+                "Functions are grouped alphabetically (A-Z). Useful for very large\n"
+            )
             f.write("ELF files as a first-pass organization.\n\n")
         elif strategy == "camelcase":
-            f.write("Functions are grouped by extracting CamelCase words from their names.\n")
+            f.write(
+                "Functions are grouped by extracting CamelCase words from their names.\n"
+            )
             f.write("Good for object-oriented code.\n\n")
         elif strategy == "single":
             f.write("All functions are placed in a single output file.\n\n")
