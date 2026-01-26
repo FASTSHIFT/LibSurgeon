@@ -817,5 +817,151 @@ def extract_class_from_method(display_name):
         assert "Draw" in content
 
 
+# ============================================================
+# Test: All Supported File Types
+# ============================================================
+
+
+class TestAllSupportedFileTypes:
+    """Tests for all supported file types using real fixture files"""
+
+    @pytest.fixture
+    def fixtures_dir(self):
+        """Return the fixtures directory path"""
+        return os.path.join(os.path.dirname(__file__), "fixtures")
+
+    def test_fixture_files_exist(self, fixtures_dir):
+        """Verify all expected fixture files exist"""
+        expected_files = [
+            "test_library.o",
+            "libtest.a",
+            "libtest.lib",
+            "libtest.so",
+            "libtest.so.1.0.0",
+            "test_program.elf",
+            "test_program.axf",
+            "test_program.out",
+        ]
+        for filename in expected_files:
+            filepath = os.path.join(fixtures_dir, filename)
+            assert os.path.exists(filepath), f"Fixture file missing: {filename}"
+
+    # --- Archive Type Tests ---
+
+    def test_archive_a_detection(self, fixtures_dir):
+        """Test .a archive file detection"""
+        filepath = os.path.join(fixtures_dir, "libtest.a")
+        assert get_file_type(filepath) == FileType.ARCHIVE
+        assert is_archive_file(filepath) is True
+        assert is_elf_file(filepath) is False
+
+    def test_archive_lib_detection(self, fixtures_dir):
+        """Test .lib archive file detection"""
+        filepath = os.path.join(fixtures_dir, "libtest.lib")
+        assert get_file_type(filepath) == FileType.ARCHIVE
+        assert is_archive_file(filepath) is True
+        assert is_elf_file(filepath) is False
+
+    # --- ELF Type Tests ---
+
+    def test_elf_o_detection(self, fixtures_dir):
+        """Test .o object file detection"""
+        filepath = os.path.join(fixtures_dir, "test_library.o")
+        assert get_file_type(filepath) == FileType.ELF
+        assert is_elf_file(filepath) is True
+        assert is_archive_file(filepath) is False
+
+    def test_elf_so_detection(self, fixtures_dir):
+        """Test .so shared library detection"""
+        filepath = os.path.join(fixtures_dir, "libtest.so")
+        assert get_file_type(filepath) == FileType.ELF
+        assert is_elf_file(filepath) is True
+        assert is_archive_file(filepath) is False
+
+    def test_elf_so_versioned_detection(self, fixtures_dir):
+        """Test versioned .so.x.y.z shared library detection"""
+        filepath = os.path.join(fixtures_dir, "libtest.so.1.0.0")
+        assert get_file_type(filepath) == FileType.ELF
+        assert is_elf_file(filepath) is True
+        assert is_archive_file(filepath) is False
+
+    def test_elf_elf_detection(self, fixtures_dir):
+        """Test .elf executable detection"""
+        filepath = os.path.join(fixtures_dir, "test_program.elf")
+        assert get_file_type(filepath) == FileType.ELF
+        assert is_elf_file(filepath) is True
+        assert is_archive_file(filepath) is False
+
+    def test_elf_axf_detection(self, fixtures_dir):
+        """Test .axf ARM executable detection"""
+        filepath = os.path.join(fixtures_dir, "test_program.axf")
+        assert get_file_type(filepath) == FileType.ELF
+        assert is_elf_file(filepath) is True
+        assert is_archive_file(filepath) is False
+
+    def test_elf_out_detection(self, fixtures_dir):
+        """Test .out executable detection"""
+        filepath = os.path.join(fixtures_dir, "test_program.out")
+        assert get_file_type(filepath) == FileType.ELF
+        assert is_elf_file(filepath) is True
+        assert is_archive_file(filepath) is False
+
+    # --- Archive Extraction Tests ---
+
+    def test_archive_a_extraction(self, fixtures_dir, temp_dir):
+        """Test extracting .a archive"""
+        archive_path = os.path.join(fixtures_dir, "libtest.a")
+        extract_archive(archive_path, temp_dir)
+        # Check that .o file was extracted
+        extracted = os.listdir(temp_dir)
+        assert len(extracted) > 0
+        assert any(f.endswith(".o") for f in extracted)
+
+    def test_archive_lib_extraction(self, fixtures_dir, temp_dir):
+        """Test extracting .lib archive"""
+        archive_path = os.path.join(fixtures_dir, "libtest.lib")
+        extract_archive(archive_path, temp_dir)
+        # Check that .o file was extracted
+        extracted = os.listdir(temp_dir)
+        assert len(extracted) > 0
+        assert any(f.endswith(".o") for f in extracted)
+
+    # --- ELF Magic Number Verification ---
+
+    def test_elf_magic_number_verification(self, fixtures_dir):
+        """Verify ELF files have correct magic number"""
+        elf_files = [
+            "test_library.o",
+            "libtest.so",
+            "test_program.elf",
+            "test_program.axf",
+            "test_program.out",
+        ]
+        for filename in elf_files:
+            filepath = os.path.join(fixtures_dir, filename)
+            with open(filepath, "rb") as f:
+                magic = f.read(4)
+            assert magic == b"\x7fELF", f"{filename} does not have ELF magic"
+
+    def test_archive_magic_number_verification(self, fixtures_dir):
+        """Verify archive files have correct magic number"""
+        archive_files = ["libtest.a", "libtest.lib"]
+        for filename in archive_files:
+            filepath = os.path.join(fixtures_dir, filename)
+            with open(filepath, "rb") as f:
+                magic = f.read(7)
+            assert magic == b"!<arch>", f"{filename} does not have archive magic"
+
+    # --- Unknown Type Tests ---
+
+    def test_unknown_file_type(self, fixtures_dir):
+        """Test that non-supported files are marked as UNKNOWN"""
+        # test_library.c is a source file, not a binary
+        filepath = os.path.join(fixtures_dir, "test_library.c")
+        assert get_file_type(filepath) == FileType.UNKNOWN
+        assert is_elf_file(filepath) is False
+        assert is_archive_file(filepath) is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
