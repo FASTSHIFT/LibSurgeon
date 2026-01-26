@@ -84,9 +84,9 @@ jobs:
   # Integration Test (with Ghidra)
   # ============================================================
   integration:
-    name: Integration Test
+    name: Integration Test (Ghidra)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Run on all PRs and pushes to test Ghidra integration
     
     steps:
     - uses: actions/checkout@v4
@@ -107,11 +107,12 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
     
-    - name: Download Ghidra
+    - name: Download and setup Ghidra
       run: |
         wget -q https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.2.1_build/ghidra_11.2.1_PUBLIC_20241105.zip
         unzip -q ghidra_11.2.1_PUBLIC_20241105.zip
         mv ghidra_11.2.1_PUBLIC $HOME/ghidra
+        echo "GHIDRA_HOME=$HOME/ghidra" >> $GITHUB_ENV
     
     - name: Build test fixtures
       run: |
@@ -140,12 +141,62 @@ jobs:
         mkdir -p test_output
         echo 'void test() { return; }' > test_output/sample.cpp
         python evaluate_quality.py test_output/
+
+    - name: Test quality evaluation with C files
+      run: |
+        # Test that *.c* pattern works for both .c and .cpp
+        mkdir -p test_output_c
+        echo 'int foo(void) { return 42; }' > test_output_c/sample.c
+        echo 'void bar() { return; }' > test_output_c/sample.cpp
+        python evaluate_quality.py test_output_c/
     
     - name: Test libsurgeon help
       run: |
         python libsurgeon.py --help
         # Verify ELF module option exists
         python libsurgeon.py --help | grep -q "\-m.*prefix\|alpha\|camelcase\|single"
+
+    - name: Test architecture detection
+      run: |
+        python -c "
+from libsurgeon import detect_elf_architecture, ELF_MACHINE_MAP
+# Verify the mapping exists
+assert 0x28 in ELF_MACHINE_MAP, 'ARM should be in map'
+assert 0x3E in ELF_MACHINE_MAP, 'x86-64 should be in map'
+print('Architecture detection OK')
+"
+
+    - name: Test Ghidra decompilation of archive
+      run: |
+        # Test decompiling the test archive with Ghidra
+        python libsurgeon.py -g $HOME/ghidra tests/fixtures/libtest.a -o test_decompile_output --clean
+        
+        # Verify output was generated
+        ls -la test_decompile_output/
+        test -d test_decompile_output/libtest/src
+        
+        # Check that at least one .cpp file was created
+        cpp_count=$(find test_decompile_output/libtest/src -name "*.cpp" | wc -l)
+        echo "Generated $cpp_count .cpp files"
+        test $cpp_count -ge 1
+
+    - name: Test Ghidra decompilation with evaluation
+      run: |
+        # Test with --evaluate flag
+        python libsurgeon.py -g $HOME/ghidra tests/fixtures/libtest.a -o test_eval_output --evaluate --clean
+        
+        # Verify quality report was generated
+        test -f test_eval_output/libtest/quality_report.json
+        cat test_eval_output/libtest/quality_report.json
+
+    - name: Test ELF file decompilation
+      run: |
+        # Test decompiling ELF executable
+        python libsurgeon.py -g $HOME/ghidra tests/fixtures/test_program.elf -o test_elf_output --clean
+        
+        # Verify output
+        ls -la test_elf_output/
+        test -d test_elf_output/test_program/src
 
   # ============================================================
   # Documentation
