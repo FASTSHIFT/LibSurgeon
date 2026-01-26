@@ -25,6 +25,14 @@ from evaluate_quality import (
     analyze_directory,
     analyze_file,
 )
+from ghidra_common import (
+    extract_function_signature,
+    generate_header_file,
+    generate_master_header,
+    generate_types_header,
+    normalize_code_types,
+    sanitize_filename,
+)
 from libsurgeon import (
     ELF_MACHINE_MAP,
     MODULE_STRATEGIES,
@@ -1162,6 +1170,268 @@ class TestAllSupportedFileTypes:
         assert get_file_type(filepath) == FileType.UNKNOWN
         assert is_elf_file(filepath) is False
         assert is_archive_file(filepath) is False
+
+
+# ============================================================
+# Test: Header File Generation (ghidra_common)
+# ============================================================
+
+
+class TestHeaderGeneration:
+    """Tests for header file generation functions in ghidra_common"""
+
+    def test_extract_function_signature_simple(self):
+        """Test extracting function signature from simple function"""
+        code = """int my_function(int param1, char *param2)
+{
+    return 42;
+}"""
+        sig = extract_function_signature(code)
+        assert sig is not None
+        assert "my_function" in sig
+        assert "int" in sig
+        assert "param1" in sig
+
+    def test_extract_function_signature_void(self):
+        """Test extracting signature from void function"""
+        code = """void empty_function(void)
+{
+}"""
+        sig = extract_function_signature(code)
+        assert sig is not None
+        assert "void" in sig
+        assert "empty_function" in sig
+
+    def test_extract_function_signature_multiline(self):
+        """Test extracting signature from multiline declaration"""
+        code = """static int
+multiline_function(int a,
+                   int b,
+                   int c)
+{
+    return a + b + c;
+}"""
+        sig = extract_function_signature(code)
+        assert sig is not None
+        assert "multiline_function" in sig
+
+    def test_extract_function_signature_with_undefined(self):
+        """Test that Ghidra types are normalized in signature"""
+        code = """undefined4 process_data(undefined8 input)
+{
+    return 0;
+}"""
+        sig = extract_function_signature(code)
+        assert sig is not None
+        # Should be normalized to standard types
+        assert "undefined4" not in sig or "unk32_t" in sig
+
+    def test_extract_function_signature_empty(self):
+        """Test extracting from empty/invalid code"""
+        assert extract_function_signature("") is None
+        assert extract_function_signature(None) is None
+        assert extract_function_signature("   ") is None
+
+    def test_extract_function_signature_variable_decl(self):
+        """Test that variable declarations are rejected"""
+        code = "int global_var;"
+        sig = extract_function_signature(code)
+        assert sig is None
+
+    def test_generate_header_file(self, temp_dir):
+        """Test generating a header file"""
+        func_signatures = [
+            ("my_func", "int my_func(int a, int b)"),
+            ("another_func", "void another_func(void)"),
+        ]
+        header_path = generate_header_file(temp_dir, "test_module", func_signatures)
+
+        assert os.path.isfile(header_path)
+        assert header_path.endswith(".h")
+
+        with open(header_path, "r") as f:
+            content = f.read()
+
+        assert "#ifndef" in content
+        assert "#define" in content
+        assert "#endif" in content
+        assert "my_func" in content
+        assert "another_func" in content
+        assert 'extern "C"' in content
+
+    def test_generate_header_file_with_source_type(self, temp_dir):
+        """Test header file includes correct source type"""
+        func_signatures = [("test_func", "int test_func(void)")]
+        header_path = generate_header_file(
+            temp_dir, "module", func_signatures, "custom source type"
+        )
+
+        with open(header_path, "r") as f:
+            content = f.read()
+
+        assert "custom source type" in content
+
+    def test_generate_master_header(self, temp_dir):
+        """Test generating master header file"""
+        modules = ["module_a", "module_b", "module_c"]
+        master_path = generate_master_header(temp_dir, modules, "test_program")
+
+        assert os.path.isfile(master_path)
+        assert "_all_headers.h" in master_path
+
+        with open(master_path, "r") as f:
+            content = f.read()
+
+        assert "#ifndef _ALL_HEADERS_H_" in content
+        assert "module_a.h" in content
+        assert "module_b.h" in content
+        assert "module_c.h" in content
+
+    def test_generate_types_header(self, temp_dir):
+        """Test generating types header file"""
+        types_path = generate_types_header(temp_dir)
+
+        assert os.path.isfile(types_path)
+        assert types_path.endswith("_types.h")
+
+        with open(types_path, "r") as f:
+            content = f.read()
+
+        assert "#ifndef _LIBSURGEON_TYPES_H_" in content
+        assert "unk8_t" in content
+        assert "unk32_t" in content
+        assert "typedef" in content
+
+
+class TestNormalizeCodeTypes:
+    """Tests for type normalization functions"""
+
+    def test_normalize_undefined_types(self):
+        """Test normalization of Ghidra undefined types"""
+        code = "undefined4 x = 0; undefined8 y = 1;"
+        normalized = normalize_code_types(code)
+        assert "undefined4" not in normalized
+        assert "undefined8" not in normalized
+        assert "unk32_t" in normalized
+        assert "unk64_t" in normalized
+
+    def test_normalize_basic_types(self):
+        """Test normalization of Ghidra basic types"""
+        code = "dword value; qword large;"
+        normalized = normalize_code_types(code)
+        assert "uint32_t" in normalized
+        assert "uint64_t" in normalized
+
+    def test_normalize_preserves_standard_types(self):
+        """Test that standard C types are preserved"""
+        code = "int32_t x; uint8_t y; void *ptr;"
+        normalized = normalize_code_types(code)
+        assert "int32_t" in normalized
+        assert "uint8_t" in normalized
+        assert "void *" in normalized
+
+
+class TestSanitizeFilename:
+    """Tests for filename sanitization"""
+
+    def test_basic_sanitize(self):
+        """Test basic filename sanitization"""
+        assert sanitize_filename("hello") == "hello"
+        assert sanitize_filename("test_file") == "test_file"
+
+    def test_sanitize_special_chars(self):
+        """Test sanitization of special characters"""
+        result = sanitize_filename("test/file:name")
+        assert "/" not in result
+        assert ":" not in result
+
+    def test_sanitize_spaces(self):
+        """Test sanitization of spaces"""
+        result = sanitize_filename("test file name")
+        assert " " not in result
+
+
+class TestDirectorySeparation:
+    """Tests for src/include directory separation"""
+
+    def test_header_files_in_include_dir(self, temp_dir):
+        """Test that header files are generated in include directory, not src"""
+        src_dir = os.path.join(temp_dir, "src")
+        include_dir = os.path.join(temp_dir, "include")
+        os.makedirs(src_dir, exist_ok=True)
+        os.makedirs(include_dir, exist_ok=True)
+
+        # Simulate header generation to include dir
+        func_signatures = [("test_func", "int test_func(void)")]
+        header_path = generate_header_file(include_dir, "module", func_signatures)
+
+        # Header should be in include dir
+        assert os.path.isfile(header_path)
+        assert include_dir in header_path
+        assert src_dir not in header_path
+
+        # No headers in src dir
+        src_headers = [f for f in os.listdir(src_dir) if f.endswith(".h")]
+        assert len(src_headers) == 0
+
+    def test_source_files_only_in_src_dir(self, temp_dir):
+        """Test that source files go to src, headers to include"""
+        src_dir = os.path.join(temp_dir, "src")
+        include_dir = os.path.join(temp_dir, "include")
+        os.makedirs(src_dir, exist_ok=True)
+        os.makedirs(include_dir, exist_ok=True)
+
+        # Create a source file in src dir
+        source_file = os.path.join(src_dir, "module.cpp")
+        with open(source_file, "w") as f:
+            f.write("// Source code\nint main() { return 0; }\n")
+
+        # Create a header file in include dir
+        header_file = os.path.join(include_dir, "module.h")
+        with open(header_file, "w") as f:
+            f.write("#ifndef MODULE_H\n#define MODULE_H\n#endif\n")
+
+        # Verify separation
+        src_files = os.listdir(src_dir)
+        include_files = os.listdir(include_dir)
+
+        assert "module.cpp" in src_files
+        assert "module.h" not in src_files
+        assert "module.h" in include_files
+        assert "module.cpp" not in include_files
+
+    def test_types_header_in_include_dir(self, temp_dir):
+        """Test that _types.h is generated in include directory"""
+        include_dir = os.path.join(temp_dir, "include")
+        os.makedirs(include_dir, exist_ok=True)
+
+        types_path = generate_types_header(include_dir)
+
+        assert os.path.isfile(types_path)
+        assert types_path == os.path.join(include_dir, "_types.h")
+
+    def test_master_header_includes_all_modules(self, temp_dir):
+        """Test that master header includes all module headers"""
+        include_dir = os.path.join(temp_dir, "include")
+        os.makedirs(include_dir, exist_ok=True)
+
+        # Create some module headers
+        modules = ["module_a", "module_b", "module_c"]
+        for module in modules:
+            header_file = os.path.join(include_dir, f"{module}.h")
+            with open(header_file, "w") as f:
+                f.write(f"// Header for {module}\n")
+
+        # Generate master header
+        master_path = generate_master_header(include_dir, modules, "test_program")
+
+        assert os.path.isfile(master_path)
+
+        with open(master_path, "r") as f:
+            content = f.read()
+
+        for module in modules:
+            assert f'#include "{module}.h"' in content
 
 
 if __name__ == "__main__":

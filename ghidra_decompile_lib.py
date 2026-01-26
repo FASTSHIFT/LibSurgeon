@@ -26,7 +26,10 @@ from java.io import File
 from ghidra_common import (
     demangle_cpp_name,
     extract_class_name,
+    extract_function_signature,
     extract_namespace,
+    generate_header_file,
+    generate_types_header,
     get_decompiled_function_basic,
     sanitize_filename,
     should_skip_function,
@@ -46,15 +49,26 @@ def main():
     else:
         output_dir = "/tmp/libsurgeon_decompiled"
 
+    # Get include directory from second argument (optional)
+    if args and len(args) > 1:
+        include_dir = args[1]
+    else:
+        # Default: create include dir alongside output_dir
+        include_dir = os.path.join(os.path.dirname(output_dir), "include")
+
     # Get current program name
     program_name = currentProgram.getName()
     print("\n[Info] Processing: {}".format(program_name))
     print("[Info] Output directory: {}".format(output_dir))
+    print("[Info] Include directory: {}".format(include_dir))
 
-    # Create output directory
+    # Create output directories
     output_path = File(output_dir)
     if not output_path.exists():
         output_path.mkdirs()
+    include_path = File(include_dir)
+    if not include_path.exists():
+        include_path.mkdirs()
 
     # Initialize decompiler
     monitor = ConsoleTaskMonitor()
@@ -144,6 +158,9 @@ def main():
             primary_namespace = sorted(namespaces_found)[0]
             f.write("namespace {} {{\n\n".format(primary_namespace))
 
+        # Collect function signatures for header generation
+        func_signatures = []
+
         # Write decompiled code organized by class
         for class_name, funcs in sorted(class_functions.items()):
             f.write("// ============================================================\n")
@@ -160,6 +177,11 @@ def main():
                     f.write(decompiled)
                     f.write("\n")
                     decompiled_count += 1
+
+                    # Extract function signature for header
+                    signature = extract_function_signature(decompiled)
+                    if signature:
+                        func_signatures.append((demangled_name, signature))
                 else:
                     f.write(
                         "// [FAILED] Could not decompile: {}\n\n".format(demangled_name)
@@ -181,6 +203,11 @@ def main():
                     f.write(decompiled)
                     f.write("\n")
                     decompiled_count += 1
+
+                    # Extract function signature for header
+                    signature = extract_function_signature(decompiled)
+                    if signature:
+                        func_signatures.append((display_name, signature))
                 else:
                     f.write(
                         "// [FAILED] Could not decompile: {}\n\n".format(display_name)
@@ -191,6 +218,16 @@ def main():
         if primary_namespace:
             f.write("}} // namespace {}\n".format(primary_namespace))
 
+    # Generate header file to include directory
+    header_file = None
+    if func_signatures:
+        header_file = generate_header_file(
+            include_dir, base_name, func_signatures, "library decompilation"
+        )
+        # Also generate types header
+        generate_types_header(include_dir)
+        print("[Info] Generated header file: {}".format(header_file))
+
     # Close decompiler
     decomp_ifc.dispose()
 
@@ -198,6 +235,8 @@ def main():
     print("  - Successfully decompiled: {} functions".format(decompiled_count))
     print("  - Failed: {} functions".format(failed_count))
     print("  - Output file: {}".format(output_file))
+    if header_file:
+        print("  - Header file: {}".format(header_file))
 
 
 # Run main function
