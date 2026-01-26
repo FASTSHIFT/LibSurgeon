@@ -161,13 +161,13 @@ def show_progress(
     # Clear line and print
     print(f"\r\033[K{progress_line}")
 
-    # Show current file
+    # Show current file (clear line first to avoid leftover characters)
     if filename:
         print(
-            f"{Colors.DIM}  -> Completed: {Colors.NC}{Colors.GREEN}{filename}{Colors.NC}"
+            f"\033[K{Colors.DIM}  -> Completed: {Colors.NC}{Colors.GREEN}{filename}{Colors.NC}"
         )
     else:
-        print(f"{Colors.DIM}  -> Processing...{Colors.NC}")
+        print(f"\033[K{Colors.DIM}  -> Processing...{Colors.NC}")
 
     # Move cursor up 2 lines
     print("\033[2A", end="")
@@ -335,6 +335,9 @@ def matches_pattern(filename: str, pattern: str) -> bool:
 def extract_archive(archive_path: str, output_dir: str) -> List[str]:
     """Extract .o files from a .a archive"""
     os.makedirs(output_dir, exist_ok=True)
+
+    # Convert to absolute path before changing directory
+    archive_path = os.path.abspath(archive_path)
 
     orig_dir = os.getcwd()
     try:
@@ -514,15 +517,46 @@ def process_archive(
         total = len(obj_files)
 
         log_info(f"Found {total} object files")
+        print()  # Space for progress bar
+        print()
 
         batch_result = BatchResult(total=total)
         start_time = time.time()
+        completed = 0
+
+        def update_batch_result(result: DecompileResult, basename: str):
+            """Update batch result with decompile result"""
+            nonlocal completed
+            batch_result.results.append(result)
+
+            if result.success:
+                batch_result.success += 1
+                if result.skipped:
+                    batch_result.skipped += 1
+                batch_result.total_lines += result.lines
+            else:
+                batch_result.failed += 1
+                batch_result.failed_files.append(basename)
+
+            completed += 1
+            elapsed = int(time.time() - start_time)
+            eta = 0
+            if completed > 0:
+                avg_time = elapsed / completed
+                eta = int((total - completed) * avg_time)
+
+            status = (
+                "Skipped"
+                if result.skipped
+                else ("FAILED" if not result.success else "Done")
+            )
+            filename = f"{basename}.o ({status}, {result.lines} lines)"
+            show_progress(completed, total, elapsed, filename, eta)
 
         if jobs == 1:
             # Sequential processing
-            for i, obj_file in enumerate(obj_files, 1):
+            for obj_file in obj_files:
                 basename = os.path.splitext(os.path.basename(obj_file))[0]
-                print(f"[{i}/{total}] Processing: {basename}.o")
 
                 result = decompile_object_file(
                     obj_file,
@@ -533,25 +567,12 @@ def process_archive(
                     skip_existing,
                 )
 
-                batch_result.results.append(result)
-
-                if result.success:
-                    if result.skipped:
-                        print(f"  -> Skipped (exists, {result.lines} lines)")
-                        batch_result.skipped += 1
-                    else:
-                        print(f"  -> Done ({result.lines} lines)")
-                    batch_result.success += 1
-                    batch_result.total_lines += result.lines
-                else:
-                    print(f"  -> FAILED: {result.error}")
-                    batch_result.failed += 1
-                    batch_result.failed_files.append(basename)
+                update_batch_result(result, basename)
         else:
             # Parallel processing
             with ThreadPoolExecutor(max_workers=jobs) as executor:
                 futures = {}
-                for i, obj_file in enumerate(obj_files, 1):
+                for obj_file in obj_files:
                     future = executor.submit(
                         decompile_object_file,
                         obj_file,
@@ -561,35 +582,28 @@ def process_archive(
                         project_dir,
                         skip_existing,
                     )
-                    futures[future] = (i, obj_file)
+                    futures[future] = obj_file
 
                 for future in as_completed(futures):
-                    i, obj_file = futures[future]
+                    obj_file = futures[future]
                     basename = os.path.splitext(os.path.basename(obj_file))[0]
 
                     try:
                         result = future.result()
-                        batch_result.results.append(result)
-
-                        if result.success:
-                            status = "Skipped" if result.skipped else "Done"
-                            print(
-                                f"[{i}/{total}] {basename}: {status} ({result.lines} lines)"
-                            )
-                            batch_result.success += 1
-                            if result.skipped:
-                                batch_result.skipped += 1
-                            batch_result.total_lines += result.lines
-                        else:
-                            print(f"[{i}/{total}] {basename}: FAILED - {result.error}")
-                            batch_result.failed += 1
-                            batch_result.failed_files.append(basename)
                     except Exception as e:
-                        print(f"[{i}/{total}] {basename}: EXCEPTION - {e}")
-                        batch_result.failed += 1
-                        batch_result.failed_files.append(basename)
+                        result = DecompileResult(
+                            input_file=obj_file,
+                            output_file="",
+                            success=False,
+                            error=str(e),
+                        )
+
+                    update_batch_result(result, basename)
 
         batch_result.duration = time.time() - start_time
+
+        # Show final progress
+        show_progress_final(total, int(batch_result.duration))
 
     finally:
         # Cleanup

@@ -355,6 +355,24 @@ class TestArchiveProcessing:
         assert len(obj_files) >= 1
         assert any(f.endswith(".o") for f in obj_files)
 
+    def test_extract_archive_relative_path(self, test_archive, temp_dir):
+        """Test archive extraction with relative path"""
+        # Change to a different directory and use relative path
+        orig_dir = os.getcwd()
+        try:
+            parent_dir = os.path.dirname(test_archive)
+            archive_name = os.path.basename(test_archive)
+            os.chdir(parent_dir)
+
+            # Use relative path for archive
+            extract_dir = os.path.join(temp_dir, "extracted_rel")
+            obj_files = extract_archive(archive_name, extract_dir)
+
+            assert len(obj_files) >= 1
+            assert any(f.endswith(".o") for f in obj_files)
+        finally:
+            os.chdir(orig_dir)
+
     def test_is_archive_file(self, test_archive, temp_dir):
         """Test archive magic number detection"""
         assert is_archive_file(test_archive) is True
