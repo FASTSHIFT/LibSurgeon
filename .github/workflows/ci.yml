@@ -2,9 +2,7 @@ name: LibSurgeon CI
 
 on:
   push:
-    branches: [ '**' ]
   pull_request:
-    branches: [ '**' ]
 
 jobs:
   # ============================================================
@@ -158,13 +156,7 @@ jobs:
 
     - name: Test architecture detection
       run: |
-        python -c "
-from libsurgeon import detect_elf_architecture, ELF_MACHINE_MAP
-# Verify the mapping exists
-assert 0x28 in ELF_MACHINE_MAP, 'ARM should be in map'
-assert 0x3E in ELF_MACHINE_MAP, 'x86-64 should be in map'
-print('Architecture detection OK')
-"
+        python -c "from libsurgeon import detect_elf_architecture, ELF_MACHINE_MAP; assert 0x28 in ELF_MACHINE_MAP, 'ARM should be in map'; assert 0x3E in ELF_MACHINE_MAP, 'x86-64 should be in map'; print('Architecture detection OK')"
 
     - name: Test Ghidra decompilation of archive
       run: |
