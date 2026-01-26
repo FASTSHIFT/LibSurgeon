@@ -17,6 +17,8 @@ Module Grouping Strategies:
   - alpha: Group by first letter (A-Z)
   - camelcase: Extract CamelCase words as module names
   - single: All functions in one file
+
+For library (.a/.o) file processing, use ghidra_decompile_lib.py instead.
 """
 
 import os
@@ -37,117 +39,18 @@ from ghidra.program.model.symbol import SourceType
 from ghidra.util.task import ConsoleTaskMonitor
 from java.io import File
 
-# Ghidra undefined type to standard C type mapping
-# For 'undefined' types, we use custom typedefs (unk8_t, unk16_t, etc.)
-# since Ghidra cannot determine signedness. Users can adjust as needed.
-GHIDRA_TYPE_MAP = {
-    # Undefined types - use custom 'unk' types to indicate uncertainty
-    # These will be typedef'd in _types.h, defaulting to signed
-    "undefined": "unk8_t",
-    "undefined1": "unk8_t",
-    "undefined2": "unk16_t",
-    "undefined3": "unk32_t",  # 3 bytes, approximate with 32-bit
-    "undefined4": "unk32_t",
-    "undefined5": "unk64_t",
-    "undefined6": "unk64_t",
-    "undefined7": "unk64_t",
-    "undefined8": "unk64_t",
-    # Basic types - these have known signedness
-    "byte": "uint8_t",
-    "ubyte": "uint8_t",
-    "sbyte": "int8_t",
-    "word": "uint16_t",
-    "sword": "int16_t",
-    "dword": "uint32_t",
-    "sdword": "int32_t",
-    "qword": "uint64_t",
-    "sqword": "int64_t",
-    # Ghidra specific - usually unsigned
-    "uint": "uint32_t",
-    "ushort": "uint16_t",
-    "ulong": "uint32_t",
-    "ulonglong": "uint64_t",
-    "longlong": "int64_t",
-    "uchar": "uint8_t",
-    "schar": "int8_t",
-    # Pointer placeholders
-    "addr": "void *",
-    "pointer": "void *",
-}
-
-# Unknown type definitions - these go into _types.h
-# Default to signed types (more common in embedded code)
-UNKNOWN_TYPE_DEFS = """
-/**
- * Unknown/Undefined Types
- * 
- * These types represent data where Ghidra could not determine signedness.
- * Adjust to uint*_t if unsigned behavior is observed.
- * 
- * Common patterns:
- *   - Loop counters, array indices -> usually signed (int)
- *   - Bit manipulation, masks -> usually unsigned (uint)
- *   - Memory addresses, sizes -> usually unsigned (uint)
- *   - Return codes, status -> usually signed (int)
- */
-typedef int8_t   unk8_t;    /* undefined1 - could be int8_t or uint8_t */
-typedef int16_t  unk16_t;   /* undefined2 - could be int16_t or uint16_t */
-typedef int32_t  unk32_t;   /* undefined4 - could be int32_t or uint32_t */
-typedef int64_t  unk64_t;   /* undefined8 - could be int64_t or uint64_t */
-
-/* Pointer-sized unknown type */
-typedef intptr_t unkptr_t;  /* undefined pointer-sized value */
-"""
-
-
-def normalize_ghidra_type(type_str):
-    """Convert Ghidra-specific types to standard C types"""
-    if not type_str:
-        return type_str
-
-    original = type_str
-
-    # Handle pointer types first
-    ptr_count = type_str.count("*")
-    base_type = type_str.replace("*", "").strip()
-
-    # Check if it's a mapped type
-    if base_type in GHIDRA_TYPE_MAP:
-        base_type = GHIDRA_TYPE_MAP[base_type]
-
-    # Reconstruct with pointers
-    if ptr_count > 0:
-        return base_type + " " + "*" * ptr_count
-
-    return base_type
-
-
-def normalize_code_types(code):
-    """Replace Ghidra-specific types with standard C types in decompiled code"""
-    if not code:
-        return code
-
-    # Apply type mappings using word boundaries
-    for ghidra_type, c_type in GHIDRA_TYPE_MAP.items():
-        # Use word boundary to avoid partial replacements
-        pattern = r"\b" + re.escape(ghidra_type) + r"\b"
-        code = re.sub(pattern, c_type, code)
-
-    return code
-
-
-def demangle_cpp_name(mangled_name):
-    """Attempt to demangle C++ mangled names"""
-    try:
-        from ghidra.app.util.demangler import DemanglerUtil
-
-        demangled = DemanglerUtil.demangle(currentProgram, mangled_name)
-        if demangled:
-            return demangled.getSignature(False)
-    except:
-        pass
-    return mangled_name
-
+# Import shared utilities from ghidra_common
+from ghidra_common import (
+    GHIDRA_TYPE_MAP,
+    UNKNOWN_TYPE_DEFS,
+    demangle_cpp_name,
+    enhance_decompiled_code,
+    extract_class_from_method,
+    extract_namespace,
+    normalize_code_types,
+    normalize_ghidra_type,
+    sanitize_filename,
+)
 
 # ============================================================
 # C++ Class and Virtual Function Analysis
@@ -165,32 +68,6 @@ class CppClassInfo:
         self.struct_type = None  # Associated Ghidra struct type
         self.parent_class = None
         self.size = 0
-
-
-def extract_class_from_method(display_name):
-    """
-    Extract class name from a method signature.
-
-    Examples:
-        'void CoreView::Draw(void)' -> 'CoreView'
-        'void Namespace::Class::Method(int)' -> 'Namespace::Class'
-        'void __thiscall CoreView::Init(CoreView *this)' -> 'CoreView'
-    """
-    # Remove return type prefix
-    match = re.match(
-        r"(?:[\w\s\*]+\s+)?(?:__thiscall\s+)?(\w+(?:::\w+)*)::\w+\s*\(", display_name
-    )
-    if match:
-        return match.group(1)
-
-    # Try simpler pattern for mangled names
-    if "::" in display_name:
-        parts = display_name.split("::")
-        if len(parts) >= 2:
-            # Return everything except the last part (method name)
-            return "::".join(parts[:-1]).split("(")[0].strip()
-
-    return None
 
 
 def is_virtual_method(func, program):
@@ -259,7 +136,7 @@ def analyze_vtables(program, monitor):
                 # Try to extract class name
                 if sym_name.startswith("_ZTV"):
                     # Demangle
-                    demangled = demangle_cpp_name(sym_name)
+                    demangled = demangle_cpp_name(sym_name, program)
                     if "vtable for " in demangled:
                         class_name = demangled.replace("vtable for ", "").strip()
                     else:
@@ -363,55 +240,6 @@ def analyze_cpp_classes(program, module_functions, vtables, monitor):
     return classes
 
 
-def enhance_decompiled_code(code, class_info_map, struct_info_map):
-    """
-    Enhance decompiled code with class/struct field annotations.
-
-    Improvements:
-    1. Annotate this->field_0x10 with struct member info if known
-    2. Mark virtual function calls
-    3. Add class hierarchy comments
-    """
-    if not code:
-        return code
-
-    enhanced = code
-
-    # Pattern to match struct field access: *(type *)(ptr + offset)
-    # or: ptr->field_0xNN
-    field_pattern = r"(field_0x[0-9a-fA-F]+)"
-
-    # Add comments for unknown fields to help analysis
-    # This is a placeholder - full implementation would cross-reference with struct definitions
-    matches = re.findall(field_pattern, enhanced)
-    if matches:
-        # Add a hint comment at the function start if there are many unknown fields
-        unique_fields = set(matches)
-        if len(unique_fields) > 3:
-            hint = "// NOTE: {} unknown struct fields accessed - consider defining struct type\n".format(
-                len(unique_fields)
-            )
-            # Insert after function signature
-            brace_pos = enhanced.find("{")
-            if brace_pos > 0:
-                enhanced = (
-                    enhanced[: brace_pos + 1] + "\n" + hint + enhanced[brace_pos + 1 :]
-                )
-
-    # Pattern to match vtable calls: (*(func_ptr_type *)(*obj + offset))()
-    vtable_pattern = r"\(\*\*\(\w+\s*\*\*\)\(\*?\(?(\w+)\)?\s*\+\s*(0x[0-9a-fA-F]+)\)\)"
-
-    def vtable_replacer(match):
-        obj_name = match.group(1)
-        offset = match.group(2)
-        # Add annotation comment
-        return match.group(0) + " /* vtable[{}] */".format(offset)
-
-    enhanced = re.sub(vtable_pattern, vtable_replacer, enhanced)
-
-    return enhanced
-
-
 def generate_class_header(output_dir, classes, program_name):
     """Generate a header file documenting discovered C++ classes"""
     if not classes:
@@ -489,10 +317,14 @@ def generate_class_header(output_dir, classes, program_name):
     return header_file
 
 
-def get_decompiled_function(
+def get_decompiled_function_elf(
     decomp_ifc, func, monitor, class_info=None, struct_info=None
 ):
-    """Decompile a single function and return C code with normalized types"""
+    """
+    Decompile a single function and return C code with normalized types.
+
+    ELF-specific version with class/struct enhancement.
+    """
     try:
         results = decomp_ifc.decompileFunction(func, 60, monitor)
         if results and results.decompileCompleted():
@@ -504,37 +336,6 @@ def get_decompiled_function(
             return code
     except Exception as e:
         print("  [Error] Failed to decompile {}: {}".format(func.getName(), str(e)))
-    return None
-
-
-def sanitize_filename(name):
-    """Sanitize filename by removing illegal characters"""
-    name = re.sub(r'[<>:"/\\|?*]', "_", name)
-    name = re.sub(r"\s+", "_", name)
-    name = re.sub(r"[^\w\-]", "_", name)
-    # Collapse multiple underscores
-    name = re.sub(r"_+", "_", name)
-    name = name.strip("_")
-    if len(name) > 100:
-        name = name[:100]
-    return name
-
-
-def extract_class_name(func_name):
-    """Extract class name from function name"""
-    if "::" in func_name:
-        parts = func_name.split("::")
-        if len(parts) >= 2:
-            return parts[-2] if len(parts) > 2 else parts[0]
-    return None
-
-
-def extract_namespace(func_name):
-    """Extract top-level namespace from function name"""
-    if "::" in func_name:
-        parts = func_name.split("::")
-        if len(parts) >= 1:
-            return parts[0]
     return None
 
 
@@ -1101,7 +902,7 @@ def main():
         # Try to demangle C++ names
         display_name = func_name
         if func_name.startswith("_Z"):
-            demangled = demangle_cpp_name(func_name)
+            demangled = demangle_cpp_name(func_name, currentProgram)
             if demangled and demangled != func_name:
                 display_name = demangled
                 # Track namespace
@@ -1220,7 +1021,7 @@ def main():
                 )
 
                 # Decompile with class/struct enhancement
-                decompiled = get_decompiled_function(
+                decompiled = get_decompiled_function_elf(
                     decomp_ifc, func, monitor, cpp_classes, struct_info
                 )
 

@@ -34,7 +34,7 @@ LibSurgeon is a powerful automated tool that performs surgical extraction of C/C
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/LibSurgeon.git
+git clone https://github.com/FASTSHIFT/LibSurgeon.git
 cd LibSurgeon
 
 # Install Python dependencies (optional, for development)
@@ -89,15 +89,6 @@ Options:
   -c, --clean           Clean previous output before processing
 ```
 
-### `batch_decompile.py` - Batch Decompilation
-
-Standalone batch decompiler for object files.
-
-```bash
-python batch_decompile.py -g /path/to/ghidra -i input.a -o output/
-python batch_decompile.py -g /path/to/ghidra -i extracted_dir/ -o output/ -j 4
-```
-
 ### `evaluate_quality.py` - Quality Assessment
 
 Analyze decompilation quality with detailed metrics.
@@ -107,6 +98,16 @@ python evaluate_quality.py ./decompiled_src/
 python evaluate_quality.py ./output/ --verbose
 python evaluate_quality.py ./output/ --json report.json
 ```
+
+### Ghidra Scripts
+
+LibSurgeon uses specialized Ghidra headless scripts:
+
+| Script | Purpose |
+|--------|---------|
+| `ghidra_common.py` | Shared utilities (type mapping, demangling, code enhancement) |
+| `ghidra_decompile_lib.py` | Decompiles `.o` files from static libraries |
+| `ghidra_decompile_elf.py` | Decompiles ELF binaries with module grouping and C++ analysis |
 
 **Quality Metrics:**
 - `halt_baddata`: Ghidra analysis failures (critical)

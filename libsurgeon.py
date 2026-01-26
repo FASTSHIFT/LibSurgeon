@@ -500,7 +500,7 @@ def process_archive(
 
     # Find decompile script
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    decompile_script = os.path.join(script_dir, "ghidra_decompile.py")
+    decompile_script = os.path.join(script_dir, "ghidra_decompile_lib.py")
     if not os.path.isfile(decompile_script):
         raise FileNotFoundError(f"Decompile script not found: {decompile_script}")
 

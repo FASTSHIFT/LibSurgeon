@@ -1,126 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LibSurgeon - Ghidra Headless Decompilation Script
+LibSurgeon - Ghidra Headless Decompilation Script for Library Files
 
 This script runs in Ghidra's Headless mode to automatically analyze
 and decompile object files (.o) from static libraries (.a).
+
+For ELF file processing, use ghidra_decompile_elf.py instead.
 """
 
 import os
-import re
 
 # Ghidra Python scripts use Jython with Ghidra's API
 from ghidra.app.decompiler import DecompInterface
-from ghidra.program.model.symbol import SourceType
 from ghidra.util.task import ConsoleTaskMonitor
 from java.io import File
 
-
-def demangle_cpp_name(mangled_name):
-    """Attempt to demangle C++ mangled names"""
-    try:
-        from ghidra.app.util.demangler import DemanglerUtil
-
-        demangled = DemanglerUtil.demangle(currentProgram, mangled_name)
-        if demangled:
-            return demangled.getSignature(False)
-    except:
-        pass
-    return mangled_name
-
-
-def get_decompiled_function(decomp_ifc, func, monitor):
-    """Decompile a single function and return C code"""
-    try:
-        results = decomp_ifc.decompileFunction(func, 60, monitor)
-        if results and results.decompileCompleted():
-            return results.getDecompiledFunction().getC()
-    except Exception as e:
-        print("  [Error] Failed to decompile {}: {}".format(func.getName(), str(e)))
-    return None
-
-
-def sanitize_filename(name):
-    """Sanitize filename by removing illegal characters"""
-    # Remove or replace illegal characters
-    name = re.sub(r'[<>:"/\\|?*]', "_", name)
-    name = re.sub(r"\s+", "_", name)
-    # Limit length
-    if len(name) > 200:
-        name = name[:200]
-    return name
-
-
-def extract_class_name(func_name):
-    """Extract class name from function name"""
-    # Try to extract class name from namespace::class::method format
-    if "::" in func_name:
-        parts = func_name.split("::")
-        if len(parts) >= 2:
-            # Usually namespace::class::method
-            return parts[-2] if len(parts) > 2 else parts[0]
-    return None
-
-
-def extract_namespace(func_name):
-    """Extract top-level namespace from function name"""
-    if "::" in func_name:
-        parts = func_name.split("::")
-        if len(parts) >= 1:
-            return parts[0]
-    return None
-
-
-def should_skip_function(func):
-    """
-    Determine if a function should be skipped during decompilation.
-    Skips external symbols, thunks, and special sections that produce
-    garbage decompilation (halt_baddata).
-    """
-    func_name = func.getName()
-
-    # Skip functions in EXTERNAL block (libc, libstdc++, etc.)
-    if func.isExternal():
-        return True
-
-    # Skip thunk functions (jump stubs)
-    if func.isThunk():
-        return True
-
-    # Skip functions with addresses in EXTERNAL memory block
-    addr = func.getEntryPoint()
-    mem = currentProgram.getMemory()
-    block = mem.getBlock(addr)
-    if block is not None:
-        block_name = block.getName()
-        # Skip EXTERNAL and .group.* sections
-        if block_name == "EXTERNAL" or block_name.startswith(".group"):
-            return True
-
-    # Skip common libc/libstdc++ external function names
-    skip_patterns = [
-        "__stack_chk_fail",
-        "__assert_fail",
-        "__cxa_",
-        "__gxx_",
-        "operator delete",
-        "operator new",
-        "_Unwind_",
-        "__cxx_global_",
-        "_GLOBAL__",
-        "__static_initialization",
-    ]
-    for pattern in skip_patterns:
-        if pattern in func_name:
-            return True
-
-    return False
+# Import shared utilities
+from ghidra_common import (
+    demangle_cpp_name,
+    extract_class_name,
+    extract_namespace,
+    get_decompiled_function_basic,
+    sanitize_filename,
+    should_skip_function,
+    write_file_header,
+)
 
 
 def main():
     print("=" * 60)
-    print("LibSurgeon - Ghidra Decompilation Script")
+    print("LibSurgeon - Ghidra Decompilation Script (Library Mode)")
     print("=" * 60)
 
     # Get output directory from script arguments
@@ -172,7 +82,7 @@ def main():
             break
 
         # Skip external symbols and special sections
-        if should_skip_function(func):
+        if should_skip_function(func, currentProgram):
             skipped_count += 1
             continue
 
@@ -180,7 +90,7 @@ def main():
 
         # Try to demangle
         if func_name.startswith("_Z"):
-            demangled = demangle_cpp_name(func_name)
+            demangled = demangle_cpp_name(func_name, currentProgram)
             if demangled and demangled != func_name:
                 # Track namespace
                 ns = extract_namespace(demangled)
@@ -219,23 +129,7 @@ def main():
 
     with open(output_file, "w") as f:
         # Write file header
-        f.write("/**\n")
-        f.write(" * Auto-generated decompiled code from: {}\n".format(program_name))
-        f.write(" * Generated by LibSurgeon (Ghidra-based decompiler)\n")
-        f.write(" * \n")
-        f.write(
-            " * WARNING: This is automatically generated code from reverse engineering.\n"
-        )
-        f.write(
-            " * It may not compile directly and is intended for educational purposes only.\n"
-        )
-        f.write(" */\n\n")
-
-        # Write common includes
-        f.write("// Common includes (may need adjustment)\n")
-        f.write("#include <stdint.h>\n")
-        f.write("#include <stdbool.h>\n")
-        f.write("#include <stddef.h>\n\n")
+        write_file_header(f, base_name, func_count, program_name)
 
         # Detect and write namespace
         primary_namespace = None
@@ -253,7 +147,7 @@ def main():
             )
 
             for func, demangled_name in funcs:
-                decompiled = get_decompiled_function(decomp_ifc, func, monitor)
+                decompiled = get_decompiled_function_basic(decomp_ifc, func, monitor)
                 if decompiled:
                     f.write("// Original: {}\n".format(func.getName()))
                     f.write("// Demangled: {}\n".format(demangled_name))
@@ -275,7 +169,7 @@ def main():
             )
 
             for func, display_name in standalone_functions:
-                decompiled = get_decompiled_function(decomp_ifc, func, monitor)
+                decompiled = get_decompiled_function_basic(decomp_ifc, func, monitor)
                 if decompiled:
                     f.write("// Function: {}\n".format(display_name))
                     f.write(decompiled)
