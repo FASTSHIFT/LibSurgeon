@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 # ============================================================
 # Color and Display Utilities
@@ -176,7 +176,7 @@ def show_progress(
 def show_progress_final(total: int, elapsed: int):
     """Show final completed progress bar"""
     bar = draw_progress_bar(total, total)
-    print(f"\r\033[K\n\033[K\n", end="")
+    print("\r\033[K\n\033[K\n", end="")
     print("\033[2A", end="")
     print(
         f"{Colors.GREEN}[{bar}]{Colors.NC} {Colors.BOLD}100%{Colors.NC} ({total}/{total}) | Total: {format_time(elapsed)}"
@@ -774,7 +774,7 @@ def process_elf_file(
                         log_info(f"Decompiling {total_funcs} functions...")
                         print()  # Space for progress bar
                         print()
-                    except:
+                    except (ValueError, IndexError):
                         pass
                 elif "[PROGRESS]" in line and analysis_done:
                     try:
@@ -794,7 +794,7 @@ def process_elf_file(
                             show_progress(
                                 current_func, total_funcs, elapsed, last_func_name, eta
                             )
-                    except:
+                    except (ValueError, IndexError):
                         pass
                 elif "ANALYZING" in line and not analysis_done:
                     print(

@@ -36,8 +36,6 @@ from libsurgeon import (
     is_archive_file,
     is_elf_file,
     matches_pattern,
-    show_progress,
-    show_progress_final,
 )
 
 # Path setup is done in conftest.py

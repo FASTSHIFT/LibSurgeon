@@ -1,0 +1,12 @@
+[flake8]
+max-line-length = 88
+extend-ignore = E203, E501, W503
+
+# Exclude Ghidra Jython scripts - they use Ghidra's runtime globals
+# (currentProgram, getScriptArgs, etc.) which are injected at runtime
+exclude =
+    ghidra_decompile.py,
+    ghidra_decompile_elf.py,
+    __pycache__,
+    .git,
+    *.pyc
