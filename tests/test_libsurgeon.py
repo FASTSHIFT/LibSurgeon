@@ -30,11 +30,16 @@ from evaluate_quality import (
 from libsurgeon import (
     Colors,
     FileType,
+    MODULE_STRATEGIES,
+    draw_progress_bar,
     extract_archive,
     format_time,
     get_file_type,
     is_archive_file,
+    is_elf_file,
     matches_pattern,
+    show_progress,
+    show_progress_final,
 )
 
 # ============================================================
@@ -224,6 +229,54 @@ class TestTimeFormatting:
         assert format_time(7200) == "2h0m"
 
 
+class TestProgressBar:
+    """Tests for progress bar functions"""
+
+    def test_draw_progress_bar_empty(self):
+        """Test empty progress bar"""
+        bar = draw_progress_bar(0, 100)
+        assert len(bar) == 40
+        assert "█" not in bar
+        assert bar.count("░") == 40
+
+    def test_draw_progress_bar_full(self):
+        """Test full progress bar"""
+        bar = draw_progress_bar(100, 100)
+        assert len(bar) == 40
+        assert bar.count("█") == 40
+        assert "░" not in bar
+
+    def test_draw_progress_bar_half(self):
+        """Test half-filled progress bar"""
+        bar = draw_progress_bar(50, 100)
+        assert len(bar) == 40
+        assert bar.count("█") == 20
+        assert bar.count("░") == 20
+
+    def test_draw_progress_bar_zero_total(self):
+        """Test progress bar with zero total"""
+        bar = draw_progress_bar(0, 0)
+        assert len(bar) == 40
+        assert bar.count("░") == 40
+
+    def test_draw_progress_bar_custom_width(self):
+        """Test progress bar with custom width"""
+        bar = draw_progress_bar(50, 100, width=20)
+        assert len(bar) == 20
+
+
+class TestModuleStrategies:
+    """Tests for ELF module grouping strategies"""
+
+    def test_strategies_defined(self):
+        """Test that all strategies are defined"""
+        assert "prefix" in MODULE_STRATEGIES
+        assert "alpha" in MODULE_STRATEGIES
+        assert "camelcase" in MODULE_STRATEGIES
+        assert "single" in MODULE_STRATEGIES
+        assert len(MODULE_STRATEGIES) == 4
+
+
 # ============================================================
 # Test: Quality Evaluation
 # ============================================================
@@ -312,6 +365,38 @@ class TestArchiveProcessing:
         with open(fake_file, "w") as f:
             f.write("not an archive")
         assert is_archive_file(fake_file) is False
+
+
+class TestElfDetection:
+    """Tests for ELF file detection"""
+
+    def test_is_elf_file_valid(self, temp_dir):
+        """Test valid ELF magic number detection"""
+        # Create a file with ELF magic number
+        elf_file = os.path.join(temp_dir, "test.elf")
+        with open(elf_file, "wb") as f:
+            # ELF magic: 0x7F 'E' 'L' 'F'
+            f.write(b"\x7fELF")
+            f.write(b"\x00" * 100)  # Padding
+        assert is_elf_file(elf_file) is True
+
+    def test_is_elf_file_invalid(self, temp_dir):
+        """Test non-ELF file detection"""
+        non_elf = os.path.join(temp_dir, "not_elf.bin")
+        with open(non_elf, "wb") as f:
+            f.write(b"NOT_ELF_CONTENT")
+        assert is_elf_file(non_elf) is False
+
+    def test_is_elf_file_too_small(self, temp_dir):
+        """Test file too small for ELF header"""
+        small_file = os.path.join(temp_dir, "small.elf")
+        with open(small_file, "wb") as f:
+            f.write(b"\x7fE")  # Only 2 bytes
+        assert is_elf_file(small_file) is False
+
+    def test_is_elf_file_nonexistent(self):
+        """Test nonexistent file"""
+        assert is_elf_file("/nonexistent/path/file.elf") is False
 
 
 # ============================================================

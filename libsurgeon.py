@@ -33,7 +33,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 # ============================================================
 # Color and Display Utilities
@@ -134,6 +135,51 @@ def draw_progress_bar(current: int, total: int, width: int = 40) -> str:
     return "█" * filled + "░" * empty
 
 
+def show_progress(
+    current: int,
+    total: int,
+    elapsed: int,
+    filename: str = "",
+    eta: int = 0,
+):
+    """Show progress bar with ETA - similar to shell version"""
+    if total <= 0:
+        return
+
+    percentage = current * 100 // total
+    bar = draw_progress_bar(current, total)
+
+    # Build progress line
+    progress_line = f"{Colors.CYAN}[{bar}]{Colors.NC} {Colors.BOLD}{percentage}%{Colors.NC} ({current}/{total})"
+
+    # Add time info
+    if eta > 0:
+        progress_line += f" | Elapsed: {format_time(elapsed)} | ETA: {Colors.YELLOW}{format_time(eta)}{Colors.NC}"
+    else:
+        progress_line += f" | Elapsed: {format_time(elapsed)}"
+
+    # Clear line and print
+    print(f"\r\033[K{progress_line}")
+
+    # Show current file
+    if filename:
+        print(f"{Colors.DIM}  -> Completed: {Colors.NC}{Colors.GREEN}{filename}{Colors.NC}")
+    else:
+        print(f"{Colors.DIM}  -> Processing...{Colors.NC}")
+
+    # Move cursor up 2 lines
+    print("\033[2A", end="")
+
+
+def show_progress_final(total: int, elapsed: int):
+    """Show final completed progress bar"""
+    bar = draw_progress_bar(total, total)
+    print(f"\r\033[K\n\033[K\n", end="")
+    print("\033[2A", end="")
+    print(f"{Colors.GREEN}[{bar}]{Colors.NC} {Colors.BOLD}100%{Colors.NC} ({total}/{total}) | Total: {format_time(elapsed)}")
+    print()
+
+
 # ============================================================
 # File Type Detection
 # ============================================================
@@ -155,6 +201,9 @@ EXTENSION_MAP = {
     ".out": FileType.ELF,
     ".o": FileType.ELF,
 }
+
+# Module grouping strategies for ELF files
+MODULE_STRATEGIES = ["prefix", "alpha", "camelcase", "single"]
 
 
 def get_file_type(filepath: str) -> FileType:
@@ -590,6 +639,308 @@ def generate_archive_readme(name: str, output_dir: str, result: BatchResult):
 
 
 # ============================================================
+# ELF File Processing
+# ============================================================
+
+
+@dataclass
+class ElfResult:
+    """Result of processing an ELF file"""
+
+    input_file: str
+    output_dir: str
+    success: bool = False
+    module_count: int = 0
+    function_count: int = 0
+    total_lines: int = 0
+    duration: float = 0.0
+    error: Optional[str] = None
+
+
+def process_elf_file(
+    elf_path: str,
+    output_base: str,
+    ghidra_path: str,
+    strategy: str = "prefix",
+    timeout: int = 3600,
+    evaluate: bool = False,
+) -> ElfResult:
+    """
+    Process an ELF file using Ghidra headless mode.
+
+    Args:
+        elf_path: Path to ELF file
+        output_base: Base output directory
+        ghidra_path: Path to Ghidra installation
+        strategy: Module grouping strategy (prefix|alpha|camelcase|single)
+        timeout: Timeout in seconds for Ghidra processing
+        evaluate: Run quality evaluation after decompilation
+    """
+    elf_name = os.path.splitext(os.path.basename(elf_path))[0]
+    output_dir = os.path.join(output_base, elf_name)
+    logs_dir = os.path.join(output_dir, "logs")
+
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(logs_dir, exist_ok=True)
+
+    result = ElfResult(input_file=elf_path, output_dir=output_dir)
+    start_time = time.time()
+
+    print()
+    print(draw_box(f"Processing ELF: {elf_name}", f"Strategy: {strategy}"))
+    print()
+
+    # Validate Ghidra
+    ghidra_headless = os.path.join(ghidra_path, "support", "analyzeHeadless")
+    if not os.path.isfile(ghidra_headless):
+        result.error = f"Ghidra analyzeHeadless not found: {ghidra_headless}"
+        return result
+
+    # Find decompile script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    decompile_script = os.path.join(script_dir, "ghidra_decompile_elf.py")
+    if not os.path.isfile(decompile_script):
+        result.error = f"ELF decompile script not found: {decompile_script}"
+        return result
+
+    # Validate ELF file
+    if not is_elf_file(elf_path):
+        result.error = f"Not a valid ELF file: {elf_path}"
+        return result
+
+    log_info(f"ELF File: {elf_path}")
+    log_info(f"Output: {output_dir}")
+    log_info(f"Module Strategy: {strategy}")
+
+    # Create temp Ghidra project
+    temp_project = tempfile.mkdtemp(prefix="libsurgeon_elf_")
+
+    try:
+        log_step("Running Ghidra analysis & decompilation...")
+        print()
+
+        # Build Ghidra command
+        cmd = [
+            ghidra_headless,
+            temp_project,
+            "elf_project",
+            "-import",
+            elf_path,
+            "-processor",
+            "ARM:LE:32:Cortex",
+            "-cspec",
+            "default",
+            "-postScript",
+            decompile_script,
+            output_dir,
+            strategy,
+            "-deleteProject",
+            "-scriptlog",
+            os.path.join(logs_dir, "ghidra_script.log"),
+        ]
+
+        # Run Ghidra with progress tracking
+        log_file = os.path.join(logs_dir, "ghidra_main.log")
+
+        with open(log_file, "w") as log_f:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            total_funcs = 0
+            current_func = 0
+            analysis_done = False
+            last_func_name = ""
+            progress_start_time = time.time()
+
+            for line in process.stdout:
+                log_f.write(line)
+                log_f.flush()
+
+                # Parse progress
+                if "[PROGRESS_TOTAL]" in line:
+                    try:
+                        total_funcs = int(line.split("[PROGRESS_TOTAL]")[1].strip())
+                        analysis_done = True
+                        print()  # Clear analyzing line
+                        log_info(f"Decompiling {total_funcs} functions...")
+                        print()  # Space for progress bar
+                        print()
+                    except:
+                        pass
+                elif "[PROGRESS]" in line and analysis_done:
+                    try:
+                        progress_part = line.split("[PROGRESS]")[1].strip()
+                        parts = progress_part.split("/")
+                        current_func = int(parts[0])
+                        # Extract function name if present
+                        if " " in progress_part:
+                            last_func_name = progress_part.split(" ", 1)[1].strip()
+
+                        if total_funcs > 0 and current_func % 50 == 0:
+                            elapsed = int(time.time() - progress_start_time)
+                            eta = 0
+                            if current_func > 0:
+                                avg_time = elapsed / current_func
+                                eta = int((total_funcs - current_func) * avg_time)
+                            show_progress(current_func, total_funcs, elapsed, last_func_name, eta)
+                    except:
+                        pass
+                elif "ANALYZING" in line and not analysis_done:
+                    print(f"\r{Colors.DIM}  Ghidra analyzing...{Colors.NC}", end="", flush=True)
+
+            process.wait()
+
+            # Show final progress
+            if total_funcs > 0:
+                elapsed = int(time.time() - progress_start_time)
+                show_progress_final(total_funcs, elapsed)
+            else:
+                print()  # Newline after analyzing
+
+            if process.returncode != 0:
+                result.error = f"Ghidra process failed (exit code {process.returncode})"
+                log_error(f"Check logs at: {logs_dir}")
+                return result
+
+    except subprocess.TimeoutExpired:
+        result.error = f"Ghidra processing timed out ({timeout}s)"
+        return result
+    except Exception as e:
+        result.error = str(e)
+        return result
+    finally:
+        # Cleanup temp project
+        if os.path.isdir(temp_project):
+            shutil.rmtree(temp_project)
+
+    # Count results
+    src_dir = os.path.join(output_dir, "src")
+    include_dir = os.path.join(output_dir, "include")
+
+    if os.path.isdir(src_dir):
+        cpp_files = list(Path(src_dir).glob("*.cpp"))
+        result.module_count = len(cpp_files)
+
+        # Count lines and functions
+        for cpp_file in cpp_files:
+            with open(cpp_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+                result.total_lines += content.count("\n")
+                result.function_count += content.count("// Function:")
+
+    result.success = result.module_count > 0
+    result.duration = time.time() - start_time
+
+    if result.success:
+        h_count = len(list(Path(include_dir).glob("*.h"))) if os.path.isdir(include_dir) else 0
+
+        print()
+        log_info(f"{Colors.GREEN}ELF Processing Complete{Colors.NC}")
+        print(f"  Duration:     {format_time(int(result.duration))}")
+        print(f"  Source files: {result.module_count} .cpp files")
+        print(f"  Header files: {h_count} .h files")
+        print(f"  Functions:    {result.function_count}")
+        print(f"  Total lines:  {result.total_lines:,}")
+        print()
+
+        # Show top modules
+        if result.module_count > 0:
+            print(f"  {Colors.CYAN}Generated Modules (top 10 by size):{Colors.NC}")
+            cpp_files_with_lines = []
+            for cpp_file in Path(src_dir).glob("*.cpp"):
+                with open(cpp_file, "r", encoding="utf-8", errors="ignore") as f:
+                    lines = sum(1 for _ in f)
+                cpp_files_with_lines.append((cpp_file.name, lines))
+
+            cpp_files_with_lines.sort(key=lambda x: x[1], reverse=True)
+            for name, lines in cpp_files_with_lines[:10]:
+                print(f"     - {name} ({lines} lines)")
+
+            if result.module_count > 10:
+                print(f"     {Colors.DIM}... and {result.module_count - 10} more modules{Colors.NC}")
+            print()
+
+        # Generate README
+        generate_elf_readme(elf_name, output_dir, strategy, result)
+
+        # Run quality evaluation
+        if evaluate:
+            run_quality_evaluation(src_dir, output_dir)
+    else:
+        result.error = "No output files generated"
+        log_error("Decompilation produced no output. Check logs for details.")
+
+    return result
+
+
+def generate_elf_readme(name: str, output_dir: str, strategy: str, result: ElfResult):
+    """Generate README for decompiled ELF"""
+    readme_path = os.path.join(output_dir, "README.md")
+
+    with open(readme_path, "w") as f:
+        f.write(f"# {name} - Decompiled ELF Output\n\n")
+        f.write("## Overview\n\n")
+        f.write(f"- **Source**: {os.path.basename(result.input_file)}\n")
+        f.write(f"- **Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"- **Module Strategy**: {strategy}\n")
+        f.write(f"- **Output Modules**: {result.module_count}\n")
+        f.write(f"- **Total Functions**: {result.function_count}\n")
+        f.write(f"- **Total Lines**: {result.total_lines:,}\n")
+        f.write(f"- **Processing Time**: {format_time(int(result.duration))}\n\n")
+
+        f.write(f"## Module Grouping Strategy: {strategy}\n\n")
+
+        if strategy == "prefix":
+            f.write("Functions are grouped by their naming prefix. This works best for libraries\n")
+            f.write("with consistent naming conventions like:\n")
+            f.write("- xxBmp* (Bitmap functions) -> elf_name_xxBmp.cpp\n")
+            f.write("- xxFnt* (Font functions) -> elf_name_xxFnt.cpp\n\n")
+        elif strategy == "alpha":
+            f.write("Functions are grouped alphabetically (A-Z). Useful for very large\n")
+            f.write("ELF files as a first-pass organization.\n\n")
+        elif strategy == "camelcase":
+            f.write("Functions are grouped by extracting CamelCase words from their names.\n")
+            f.write("Good for object-oriented code.\n\n")
+        elif strategy == "single":
+            f.write("All functions are placed in a single output file.\n\n")
+
+        f.write("## Directory Structure\n\n")
+        f.write("```\n")
+        f.write(f"{name}/\n")
+        f.write("├── src/              # Decompiled source code (.cpp files)\n")
+        f.write("├── include/          # Header files (.h files)\n")
+        f.write("│   ├── _types.h      # Type definitions\n")
+        f.write("│   └── _all_headers.h # Master header\n")
+        f.write("├── logs/             # Ghidra processing logs\n")
+        f.write("├── _INDEX.md         # Complete function index\n")
+        f.write("└── README.md         # This file\n")
+        f.write("```\n\n")
+
+        # List source files
+        src_dir = os.path.join(output_dir, "src")
+        if os.path.isdir(src_dir):
+            f.write("## Source Files\n\n")
+            f.write("### Decompiled Modules (src/)\n\n")
+
+            cpp_files = sorted(Path(src_dir).glob("*.cpp"))
+            for cpp_file in cpp_files:
+                with open(cpp_file, "r", encoding="utf-8", errors="ignore") as cf:
+                    content = cf.read()
+                    lines = content.count("\n")
+                    funcs = content.count("// Function:")
+                f.write(f"- `{cpp_file.name}` - {funcs} functions ({lines} lines)\n")
+
+        f.write("\n## Disclaimer\n\n")
+        f.write("This code is automatically generated by reverse engineering.\n")
+        f.write("It is intended for educational and research purposes only.\n")
+
+
+# ============================================================
 # Quality Evaluation Integration
 # ============================================================
 
@@ -685,8 +1036,16 @@ Examples:
   # Process a single archive with quality evaluation
   python libsurgeon.py -g /opt/ghidra --evaluate lib.a
 
-  # Parallel decompilation
+  # Parallel decompilation for archives
   python libsurgeon.py -g /opt/ghidra -j 4 ./libraries/
+
+  # Process an ELF file with prefix-based module grouping
+  python libsurgeon.py -g /opt/ghidra ./firmware.elf
+
+  # ELF with different module grouping strategies
+  python libsurgeon.py -g /opt/ghidra -m alpha ./firmware.elf
+  python libsurgeon.py -g /opt/ghidra -m camelcase ./firmware.elf
+  python libsurgeon.py -g /opt/ghidra -m single ./firmware.elf
 
   # List archive contents only
   python libsurgeon.py -g /opt/ghidra --list ./my_sdk/
@@ -694,6 +1053,12 @@ Examples:
 Supported File Types:
   Archives: .a, .lib
   ELF: .so, .elf, .axf, .out, .o
+
+Module Grouping Strategies for ELF:
+  prefix    - Group by function name prefix (xxBmp*, xxFnt*) [default]
+  alpha     - Group by first letter (A-Z)
+  camelcase - Group by CamelCase words
+  single    - All functions in one file
 """,
     )
 
@@ -709,6 +1074,13 @@ Supported File Types:
     )
     parser.add_argument(
         "-j", "--jobs", type=int, default=1, help="Number of parallel jobs (default: 1)"
+    )
+    parser.add_argument(
+        "-m",
+        "--module",
+        choices=MODULE_STRATEGIES,
+        default="prefix",
+        help="Module grouping strategy for ELF: prefix|alpha|camelcase|single (default: prefix)",
     )
     parser.add_argument(
         "-i",
@@ -811,9 +1183,29 @@ Supported File Types:
             sys.exit(0 if result.failed == 0 else 1)
 
         elif file_type == FileType.ELF:
-            log_error("ELF file processing not yet implemented in Python version")
-            log_info("Use libsurgeon.sh for ELF files")
-            sys.exit(1)
+            result = process_elf_file(
+                args.target,
+                args.output,
+                args.ghidra,
+                strategy=args.module,
+                evaluate=args.evaluate,
+            )
+
+            # Print summary
+            print()
+            print("=" * 60)
+            print(f"{Colors.BOLD}Summary{Colors.NC}")
+            print("=" * 60)
+            print(f"  Modules:          {result.module_count}")
+            print(f"  Functions:        {result.function_count}")
+            print(f"  Total lines:      {result.total_lines:,}")
+            print(f"  Duration:         {format_time(int(result.duration))}")
+            print(f"  Output:           {result.output_dir}")
+
+            if result.error:
+                log_error(result.error)
+
+            sys.exit(0 if result.success else 1)
 
         else:
             log_error(f"Unsupported file type: {args.target}")
@@ -860,11 +1252,21 @@ Supported File Types:
             except Exception as e:
                 log_error(f"Failed to process {archive}: {e}")
 
-        # ELF files warning
-        if scan_result.elf_files:
-            log_warn(
-                f"Skipping {len(scan_result.elf_files)} ELF files (not supported in Python version)"
-            )
+        # ELF files processing
+        elf_results = {}
+        for elf_file in scan_result.elf_files:
+            try:
+                result = process_elf_file(
+                    elf_file,
+                    args.output,
+                    args.ghidra,
+                    strategy=args.module,
+                    evaluate=args.evaluate,
+                )
+                name = os.path.splitext(os.path.basename(elf_file))[0]
+                elf_results[name] = result
+            except Exception as e:
+                log_error(f"Failed to process {elf_file}: {e}")
 
         # Generate summary
         if all_results:
@@ -874,17 +1276,23 @@ Supported File Types:
         # Print final summary
         total_success = sum(r.success for r in all_results.values())
         total_failed = sum(r.failed for r in all_results.values())
+        elf_success = sum(1 for r in elf_results.values() if r.success)
+        elf_failed = sum(1 for r in elf_results.values() if not r.success)
 
         print()
         print("=" * 60)
         print(f"{Colors.BOLD}Final Summary{Colors.NC}")
         print("=" * 60)
-        print(f"  Libraries processed: {len(all_results)}")
-        print(f"  Total successful:    {Colors.GREEN}{total_success}{Colors.NC}")
-        print(f"  Total failed:        {Colors.RED}{total_failed}{Colors.NC}")
+        print(f"  Archives processed:  {len(all_results)}")
+        print(f"    Successful:        {Colors.GREEN}{total_success}{Colors.NC}")
+        print(f"    Failed:            {Colors.RED}{total_failed}{Colors.NC}")
+        print(f"  ELF files processed: {len(elf_results)}")
+        print(f"    Successful:        {Colors.GREEN}{elf_success}{Colors.NC}")
+        print(f"    Failed:            {Colors.RED}{elf_failed}{Colors.NC}")
         print(f"  Output:              {args.output}")
 
-        sys.exit(0 if total_failed == 0 else 1)
+        has_failures = total_failed > 0 or elf_failed > 0
+        sys.exit(0 if not has_failures else 1)
 
     else:
         log_error(f"Target not found: {args.target}")

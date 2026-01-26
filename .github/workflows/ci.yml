@@ -122,12 +122,30 @@ jobs:
       run: |
         python -c "from libsurgeon import extract_archive; print('Import OK')"
     
+    - name: Test ELF detection
+      run: |
+        python -c "from libsurgeon import is_elf_file, get_file_type, FileType; assert get_file_type('test.elf') == FileType.ELF; print('ELF detection OK')"
+    
+    - name: Test module strategies
+      run: |
+        python -c "from libsurgeon import MODULE_STRATEGIES; assert len(MODULE_STRATEGIES) == 4; print('Module strategies OK')"
+    
+    - name: Test progress bar
+      run: |
+        python -c "from libsurgeon import draw_progress_bar; bar = draw_progress_bar(50, 100); assert len(bar) == 40; print('Progress bar OK')"
+    
     - name: Test quality evaluation
       run: |
         # Create a sample decompiled file
         mkdir -p test_output
         echo 'void test() { return; }' > test_output/sample.cpp
         python evaluate_quality.py test_output/
+    
+    - name: Test libsurgeon help
+      run: |
+        python libsurgeon.py --help
+        # Verify ELF module option exists
+        python libsurgeon.py --help | grep -q "\-m.*prefix\|alpha\|camelcase\|single"
 
   # ============================================================
   # Documentation
