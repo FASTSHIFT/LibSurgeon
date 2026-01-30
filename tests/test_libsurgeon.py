@@ -1620,25 +1620,26 @@ void * CMemStore::Alloc(uint param_1,undefined param_2,undefined param_3,undefin
         # Should remove all internal blank lines
         assert "\n\n" not in cleaned.split("{", 1)[1].rsplit("}", 1)[0]
 
-
     def test_windows_line_endings(self):
         """Test handling of Windows CRLF line endings"""
         from ghidra_common import clean_decompiled_code
 
         # Simulate Windows CRLF output from Ghidra
-        code = "void TestFunc(void)\r\n\r\n{\r\n\r\n  int x;\r\n\r\n  return;\r\n\r\n}\r\n"
+        code = (
+            "void TestFunc(void)\r\n\r\n{\r\n\r\n  int x;\r\n\r\n  return;\r\n\r\n}\r\n"
+        )
         cleaned = clean_decompiled_code(code)
-        
+
         # Should not have any \r characters
         assert "\r" not in cleaned
-        
+
         # Should not have blank lines inside function
-        lines = cleaned.split('\n')
+        lines = cleaned.split("\n")
         inside_braces = False
         for line in lines:
-            if '{' in line:
+            if "{" in line:
                 inside_braces = True
-            if '}' in line:
+            if "}" in line:
                 inside_braces = False
             if inside_braces and not line.strip():
                 assert False, "Found blank line inside function body"
