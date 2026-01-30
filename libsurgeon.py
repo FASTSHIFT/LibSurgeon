@@ -618,6 +618,9 @@ def process_archive(
 
     # Validate Ghidra
     ghidra_headless = os.path.join(ghidra_path, "support", "analyzeHeadless")
+    # On Windows, use .bat extension
+    if sys.platform == "win32":
+        ghidra_headless += ".bat"
     if not os.path.isfile(ghidra_headless):
         raise FileNotFoundError(f"Ghidra analyzeHeadless not found: {ghidra_headless}")
 
@@ -908,6 +911,9 @@ def process_elf_file(
 
     # Validate Ghidra
     ghidra_headless = os.path.join(ghidra_path, "support", "analyzeHeadless")
+    # On Windows, use .bat extension
+    if sys.platform == "win32":
+        ghidra_headless += ".bat"
     if not os.path.isfile(ghidra_headless):
         result.error = f"Ghidra analyzeHeadless not found: {ghidra_headless}"
         return result
@@ -1363,6 +1369,9 @@ Module Grouping Strategies for ELF:
 
     # Validate Ghidra path
     ghidra_headless = os.path.join(args.ghidra, "support", "analyzeHeadless")
+    # On Windows, use .bat extension
+    if sys.platform == "win32":
+        ghidra_headless += ".bat"
     if not os.path.isfile(ghidra_headless):
         log_error(f"Ghidra analyzeHeadless not found: {ghidra_headless}")
         sys.exit(1)
