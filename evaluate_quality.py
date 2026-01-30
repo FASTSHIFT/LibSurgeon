@@ -66,8 +66,23 @@ class FileMetrics:
     namespaces_found: List[str] = field(default_factory=list)
     source_file_refs: List[str] = field(default_factory=list)
 
+    # Debug info indicators (from DWARF)
+    preserved_var_names: int = (
+        0  # Variables with original names (not local_XX, param_X)
+    )
+    auto_generated_vars: int = 0  # Variables with auto-generated names
+    has_debug_info_comment: bool = False  # File has debug info comment
+
     # Issues found
     issues: List[str] = field(default_factory=list)
+
+    @property
+    def debug_info_ratio(self) -> float:
+        """Calculate ratio of preserved variable names (0.0-1.0)"""
+        total = self.preserved_var_names + self.auto_generated_vars
+        if total == 0:
+            return 0.0
+        return self.preserved_var_names / total
 
     @property
     def quality_score(self) -> float:
@@ -92,6 +107,16 @@ class FileMetrics:
         if self.source_file_refs:
             score += 2
 
+        # Debug info bonus (significant - up to 15 points)
+        if self.preserved_var_names > 0:
+            # Bonus based on ratio of preserved names
+            debug_bonus = self.debug_info_ratio * 15
+            score += debug_bonus
+
+        # Extra bonus if debug info comment is present
+        if self.has_debug_info_comment:
+            score += 2
+
         return max(0, min(100, score))
 
 
@@ -110,6 +135,12 @@ class ProjectMetrics:
     total_halt_baddata: int = 0
     total_undefined_types: int = 0
     total_excessive_casts: int = 0
+
+    # Debug info metrics
+    files_with_debug_info: int = 0
+    total_preserved_vars: int = 0
+    total_auto_generated_vars: int = 0
+    avg_debug_info_ratio: float = 0.0
 
     # Summary
     avg_quality_score: float = 0.0
@@ -136,6 +167,20 @@ PATTERNS = {
     "function_comment": re.compile(r"//\s*Function:\s*(\w+)"),
     "source_file": re.compile(r"framework/source/[\w/]+\.cpp"),
     "assert_fail": re.compile(r'__assert_fail\s*\([^)]*"([^"]+)"'),
+    # Debug info patterns
+    "debug_info_comment": re.compile(r"/\*\s*Debug Information:\s*DWARF\s*\*/"),
+    "preserved_var_comment": re.compile(r"/\*\s*Variable names preserved\s*\*/"),
+    # Auto-generated variable names (Ghidra default patterns)
+    "auto_var_local": re.compile(r"\blocal_[0-9a-fA-F]+\b"),
+    "auto_var_param": re.compile(r"\bparam_\d+\b"),
+    "auto_var_uvar": re.compile(r"\b[iu]Var\d+\b"),
+    "auto_var_pvar": re.compile(r"\bpVar\d+\b"),
+    "auto_var_in": re.compile(r"\bin_[A-Z]+\b"),
+    # Meaningful variable names (likely from debug info)
+    # Match variable declarations with meaningful names (not auto-generated)
+    "meaningful_var": re.compile(
+        r"\b(int|float|double|char|void|bool|uint\d+_t|int\d+_t|size_t)\s+\*?\s*([a-z][a-zA-Z0-9_]{1,20})\s*[;=,\)]"
+    ),
 }
 
 
@@ -181,6 +226,48 @@ def analyze_file(filepath: str) -> FileMetrics:
     metrics.classes = len(PATTERNS["class_comment"].findall(content))
     metrics.functions = len(PATTERNS["function_comment"].findall(content))
 
+    # Debug info analysis
+    metrics.has_debug_info_comment = bool(
+        PATTERNS["debug_info_comment"].search(content)
+    )
+
+    # Count auto-generated variable names
+    auto_vars = set()
+    for pattern_name in [
+        "auto_var_local",
+        "auto_var_param",
+        "auto_var_uvar",
+        "auto_var_pvar",
+        "auto_var_in",
+    ]:
+        for match in PATTERNS[pattern_name].finditer(content):
+            auto_vars.add(match.group(0))
+    metrics.auto_generated_vars = len(auto_vars)
+
+    # Count meaningful variable names (likely from debug info)
+    meaningful_vars = set()
+    for match in PATTERNS["meaningful_var"].finditer(content):
+        var_name = match.group(2)
+        # Filter out common false positives
+        if var_name not in [
+            "this",
+            "void",
+            "int",
+            "char",
+            "bool",
+            "true",
+            "false",
+            "NULL",
+            "nullptr",
+        ]:
+            # Check it's not an auto-generated name
+            if not any(
+                var_name.startswith(prefix)
+                for prefix in ["local_", "param_", "uVar", "iVar", "pVar", "in_"]
+            ):
+                meaningful_vars.add(var_name)
+    metrics.preserved_var_names = len(meaningful_vars)
+
     # Record issues
     if metrics.halt_baddata > 0:
         metrics.issues.append(f"Contains {metrics.halt_baddata} halt_baddata calls")
@@ -188,6 +275,12 @@ def analyze_file(filepath: str) -> FileMetrics:
         metrics.issues.append(f"High undefined type count: {metrics.undefined_types}")
     if metrics.inline_assembly > 0:
         metrics.issues.append(f"Contains inline assembly: {metrics.inline_assembly}")
+
+    # Debug info quality note
+    if metrics.preserved_var_names > 0 and metrics.debug_info_ratio > 0.5:
+        metrics.issues.append(
+            f"Good debug info: {metrics.preserved_var_names} preserved variable names ({metrics.debug_info_ratio:.0%})"
+        )
 
     return metrics
 
@@ -230,6 +323,12 @@ def analyze_directory(directory: str, file_pattern: str = "*.c*") -> ProjectMetr
         project.total_undefined_types += metrics.undefined_types
         project.total_excessive_casts += metrics.excessive_casts
 
+        # Debug info aggregation
+        project.total_preserved_vars += metrics.preserved_var_names
+        project.total_auto_generated_vars += metrics.auto_generated_vars
+        if metrics.preserved_var_names > 0 or metrics.has_debug_info_comment:
+            project.files_with_debug_info += 1
+
         if metrics.halt_baddata > 0:
             project.files_with_halt_baddata += 1
 
@@ -241,6 +340,11 @@ def analyze_directory(directory: str, file_pattern: str = "*.c*") -> ProjectMetr
     # Calculate averages
     if quality_scores:
         project.avg_quality_score = sum(quality_scores) / len(quality_scores)
+
+    # Calculate debug info ratio
+    total_vars = project.total_preserved_vars + project.total_auto_generated_vars
+    if total_vars > 0:
+        project.avg_debug_info_ratio = project.total_preserved_vars / total_vars
 
     # Find worst files
     scored_files = [(m.filename, m.quality_score) for m in project.file_metrics]
@@ -293,6 +397,28 @@ def print_report(project: ProjectMetrics, verbose: bool = False):
 
     print(f"  undefined types:  {project.total_undefined_types:,}")
     print(f"  excessive casts:  {project.total_excessive_casts:,}")
+    print()
+
+    # Debug Info Summary
+    print(f"{Colors.BLUE}Debug Information:{Colors.NC}")
+    if project.files_with_debug_info > 0:
+        print(
+            f"  Files with debug info:    {Colors.GREEN}{project.files_with_debug_info}/{project.total_files}{Colors.NC}"
+        )
+        print(
+            f"  Preserved variable names: {Colors.GREEN}{project.total_preserved_vars:,}{Colors.NC}"
+        )
+        print(f"  Auto-generated names:     {project.total_auto_generated_vars:,}")
+        ratio_color = (
+            Colors.GREEN
+            if project.avg_debug_info_ratio > 0.5
+            else (Colors.YELLOW if project.avg_debug_info_ratio > 0.2 else Colors.RED)
+        )
+        print(
+            f"  Debug info ratio:         {ratio_color}{project.avg_debug_info_ratio:.1%}{Colors.NC}"
+        )
+    else:
+        print(f"  {Colors.YELLOW}No debug information detected{Colors.NC}")
     print()
 
     # Worst Files
@@ -365,6 +491,13 @@ def export_json(project: ProjectMetrics, output_path: str):
         "avg_quality_score": project.avg_quality_score,
         "files_with_halt_baddata": project.files_with_halt_baddata,
         "total_halt_baddata": project.total_halt_baddata,
+        # Debug info metrics
+        "debug_info": {
+            "files_with_debug_info": project.files_with_debug_info,
+            "total_preserved_vars": project.total_preserved_vars,
+            "total_auto_generated_vars": project.total_auto_generated_vars,
+            "avg_debug_info_ratio": project.avg_debug_info_ratio,
+        },
         "files": [
             {
                 "filename": m.filename,
@@ -375,6 +508,11 @@ def export_json(project: ProjectMetrics, output_path: str):
                 "namespaces": m.namespaces_found,
                 "source_refs": m.source_file_refs,
                 "issues": m.issues,
+                # Debug info per file
+                "preserved_var_names": m.preserved_var_names,
+                "auto_generated_vars": m.auto_generated_vars,
+                "debug_info_ratio": m.debug_info_ratio,
+                "has_debug_info_comment": m.has_debug_info_comment,
             }
             for m in project.file_metrics
         ],

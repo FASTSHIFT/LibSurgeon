@@ -366,6 +366,8 @@ def get_decompiled_function_basic(decomp_ifc, func, monitor):
     Decompile a single function and return C code.
 
     Basic version without type normalization or enhancements.
+    Ghidra automatically uses DWARF debug info when available,
+    preserving original variable names in the decompiled output.
 
     Args:
         decomp_ifc: Ghidra DecompInterface
@@ -380,6 +382,81 @@ def get_decompiled_function_basic(decomp_ifc, func, monitor):
         if results and results.decompileCompleted():
             code = results.getDecompiledFunction().getC()
             return clean_decompiled_code(code)
+    except Exception as e:
+        print("  [Error] Failed to decompile {}: {}".format(func.getName(), str(e)))
+    return None
+
+
+def get_decompiled_function_with_debug_info(
+    decomp_ifc, func, monitor, include_var_comments=True
+):
+    """
+    Decompile a function with enhanced debug information handling.
+
+    This function attempts to extract and preserve as much debug information
+    as possible, including original variable names, types, and source locations.
+
+    Args:
+        decomp_ifc: Ghidra DecompInterface
+        func: Ghidra Function object
+        monitor: Task monitor
+        include_var_comments: If True, add comments about preserved variable names
+
+    Returns:
+        Decompiled C code string with debug annotations, or None on failure
+    """
+    try:
+        results = decomp_ifc.decompileFunction(func, 60, monitor)
+        if results and results.decompileCompleted():
+            code = results.getDecompiledFunction().getC()
+            code = clean_decompiled_code(code)
+
+            if include_var_comments:
+                # Get high-level function representation for variable info
+                high_func = results.getHighFunction()
+                if high_func:
+                    local_symbols = high_func.getLocalSymbolMap()
+                    if local_symbols:
+                        preserved_vars = []
+                        for sym in local_symbols.getSymbols():
+                            name = sym.getName()
+                            # Check if this is an original name (not auto-generated)
+                            if not (
+                                name.startswith("local_")
+                                or name.startswith("param_")
+                                or name.startswith("in_")
+                                or name.startswith("uVar")
+                                or name.startswith("iVar")
+                                or name.startswith("pVar")
+                            ):
+                                var_type = (
+                                    sym.getDataType().getName()
+                                    if sym.getDataType()
+                                    else "?"
+                                )
+                                preserved_vars.append("{} ({})".format(name, var_type))
+
+                        if preserved_vars:
+                            # Add comment about preserved variables at function start
+                            var_comment = "/* Original variables: {} */\n".format(
+                                ", ".join(preserved_vars[:10])
+                            )
+                            if len(preserved_vars) > 10:
+                                var_comment = var_comment.rstrip(
+                                    "\n"
+                                ) + " + {} more */\n".format(len(preserved_vars) - 10)
+
+                            # Insert after function signature
+                            brace_pos = code.find("{")
+                            if brace_pos > 0:
+                                code = (
+                                    code[: brace_pos + 1]
+                                    + "\n"
+                                    + var_comment
+                                    + code[brace_pos + 1 :]
+                                )
+
+            return code
     except Exception as e:
         print("  [Error] Failed to decompile {}: {}".format(func.getName(), str(e)))
     return None

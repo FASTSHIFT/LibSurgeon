@@ -326,6 +326,182 @@ def detect_elf_architecture(filepath: str) -> Optional[tuple]:
         return None
 
 
+@dataclass
+class DebugInfo:
+    """Information about debug symbols in a file"""
+
+    has_debug: bool = False
+    format: str = "none"  # "DWARF", "COFF", "none"
+    version: Optional[str] = None
+    sections: List[str] = field(default_factory=list)
+    has_local_vars: bool = False
+    compiler: Optional[str] = None
+
+
+def detect_debug_info(filepath: str) -> DebugInfo:
+    """
+    Detect debug information in an object file.
+
+    Supports:
+    - ELF files with DWARF debug info
+    - COFF/PE files with DWARF debug info (MinGW/GCC on Windows)
+
+    Args:
+        filepath: Path to the object file
+
+    Returns:
+        DebugInfo object with detection results
+    """
+    info = DebugInfo()
+
+    try:
+        with open(filepath, "rb") as f:
+            magic = f.read(8)
+
+        # Check for ELF
+        if magic[:4] == b"\x7fELF":
+            info = _detect_elf_debug_info(filepath)
+        # Check for COFF/PE (Windows object files)
+        elif magic[:2] == b"MZ" or magic[:2] in (b"\x64\x86", b"\x4c\x01", b"\x00\x00"):
+            info = _detect_coff_debug_info(filepath)
+
+    except (IOError, OSError) as e:
+        log_warn(f"Failed to detect debug info: {e}")
+
+    return info
+
+
+def _detect_elf_debug_info(filepath: str) -> DebugInfo:
+    """Detect DWARF debug info in ELF file using readelf"""
+    info = DebugInfo()
+
+    try:
+        # Use readelf to check for debug sections
+        result = subprocess.run(
+            ["readelf", "-S", filepath], capture_output=True, text=True, timeout=10
+        )
+
+        if result.returncode == 0:
+            output = result.stdout
+            debug_sections = []
+
+            for line in output.split("\n"):
+                if ".debug_" in line:
+                    # Extract section name
+                    parts = line.split()
+                    for part in parts:
+                        if part.startswith(".debug_"):
+                            debug_sections.append(part)
+                            break
+
+            if debug_sections:
+                info.has_debug = True
+                info.format = "DWARF"
+                info.sections = debug_sections
+
+                # Check for local variable info (.debug_info section)
+                if ".debug_info" in debug_sections:
+                    info.has_local_vars = True
+
+        # Try to get DWARF version and compiler info
+        result = subprocess.run(
+            ["readelf", "--debug-dump=info", filepath],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        if result.returncode == 0:
+            output = result.stdout[:5000]  # Only check first part
+
+            # Extract DWARF version
+            for line in output.split("\n"):
+                if "版本" in line or "Version" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.isdigit():
+                            info.version = part
+                            break
+                    if info.version:
+                        break
+
+            # Extract compiler info
+            if "DW_AT_producer" in output:
+                for line in output.split("\n"):
+                    if "DW_AT_producer" in line:
+                        # Extract compiler string
+                        if ":" in line:
+                            info.compiler = line.split(":", 1)[1].strip()[:100]
+                        break
+
+    except subprocess.TimeoutExpired:
+        log_warn(f"Timeout detecting debug info for {filepath}")
+    except FileNotFoundError:
+        log_warn("readelf not found - cannot detect debug info")
+    except Exception as e:
+        log_warn(f"Error detecting ELF debug info: {e}")
+
+    return info
+
+
+def _detect_coff_debug_info(filepath: str) -> DebugInfo:
+    """Detect DWARF debug info in COFF/PE file using objdump"""
+    info = DebugInfo()
+
+    try:
+        # Use objdump to check for debug sections
+        result = subprocess.run(
+            ["objdump", "-h", filepath], capture_output=True, text=True, timeout=10
+        )
+
+        if result.returncode == 0:
+            output = result.stdout
+            debug_sections = []
+
+            for line in output.split("\n"):
+                if ".debug_" in line:
+                    parts = line.split()
+                    for part in parts:
+                        if part.startswith(".debug_"):
+                            debug_sections.append(part)
+                            break
+
+            if debug_sections:
+                info.has_debug = True
+                info.format = "DWARF"
+                info.sections = debug_sections
+
+                if ".debug_info" in debug_sections:
+                    info.has_local_vars = True
+
+        # Try to get compiler info
+        result = subprocess.run(
+            ["objdump", "--dwarf=info", filepath],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        if result.returncode == 0:
+            output = result.stdout[:5000]
+
+            if "DW_AT_producer" in output:
+                for line in output.split("\n"):
+                    if "DW_AT_producer" in line:
+                        if ":" in line:
+                            info.compiler = line.split(":", 1)[1].strip()[:100]
+                        break
+
+    except subprocess.TimeoutExpired:
+        log_warn(f"Timeout detecting debug info for {filepath}")
+    except FileNotFoundError:
+        log_warn("objdump not found - cannot detect COFF debug info")
+    except Exception as e:
+        log_warn(f"Error detecting COFF debug info: {e}")
+
+    return info
+
+
 # ============================================================
 # File Scanning
 # ============================================================
@@ -524,6 +700,10 @@ def decompile_object_file(
     proj_name = f"proj_{basename}_{os.getpid()}"
 
     try:
+        # Find DWARF configuration script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        dwarf_script = os.path.join(script_dir, "ghidra_enable_dwarf.py")
+
         cmd = [
             ghidra_headless,
             project_dir,
@@ -537,6 +717,10 @@ def decompile_object_file(
             cmd.extend(["-processor", processor])
         if cspec:
             cmd.extend(["-cspec", cspec])
+
+        # Add pre-script to configure DWARF options (if exists)
+        if os.path.isfile(dwarf_script):
+            cmd.extend(["-preScript", dwarf_script])
 
         cmd.extend(
             [
@@ -568,6 +752,23 @@ def decompile_object_file(
 
         if os.path.isfile(temp_output):
             shutil.move(temp_output, output_file)
+
+            # Apply DWARF debug info post-processing
+            try:
+                from dwarf_parser import apply_dwarf_to_code, parse_dwarf_info
+
+                dwarf_info = parse_dwarf_info(obj_file)
+                if dwarf_info.has_local_vars:
+                    with open(output_file, "r") as f:
+                        code = f.read()
+                    enhanced_code = apply_dwarf_to_code(code, dwarf_info)
+                    with open(output_file, "w") as f:
+                        f.write(enhanced_code)
+            except ImportError:
+                pass  # DWARF parser not available
+            except Exception:
+                pass  # DWARF processing failed, keep original
+
             with open(output_file, "r") as f:
                 result.lines = sum(1 for _ in f)
             result.success = True
@@ -647,6 +848,7 @@ def process_archive(
         # Detect architecture from first object file
         processor = None
         cspec = None
+        debug_info = None
         if obj_files:
             arch_info = detect_elf_architecture(obj_files[0])
             if arch_info:
@@ -654,6 +856,27 @@ def process_archive(
                 log_info(f"Detected architecture: {processor}")
             else:
                 log_warn("Could not detect architecture, using Ghidra auto-detection")
+
+            # Detect debug information
+            debug_info = detect_debug_info(obj_files[0])
+            if debug_info.has_debug:
+                log_info(
+                    f"{Colors.GREEN}Debug information detected: {debug_info.format}{Colors.NC}"
+                )
+                if debug_info.version:
+                    log_info(f"  DWARF version: {debug_info.version}")
+                if debug_info.has_local_vars:
+                    log_info(
+                        f"  {Colors.GREEN}Local variable names available{Colors.NC}"
+                    )
+                if debug_info.compiler:
+                    log_info(f"  Compiler: {debug_info.compiler[:60]}...")
+                if debug_info.sections:
+                    log_info(f"  Debug sections: {', '.join(debug_info.sections[:5])}")
+            else:
+                log_info(
+                    "No debug information found - variable names will be auto-generated"
+                )
 
         print()  # Space for progress bar
         print()

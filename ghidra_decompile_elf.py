@@ -362,7 +362,7 @@ def extract_prefix(func_name, min_prefix_len=2, max_prefix_len=30):
         xxBmpInit -> xxBmp
         xxFntGetMetrics -> xxFnt
         GfxCreateSurface -> Gfx
-        vg_lite_init -> vg_lite
+        aa_bb_init -> aa_bb
         ApplicationApplication_goHome -> ApplicationApplication
         CoreView__ReInit -> CoreView
     """
@@ -408,7 +408,7 @@ def extract_prefix(func_name, min_prefix_len=2, max_prefix_len=30):
     if match and len(match.group(1)) >= min_prefix_len:
         return match.group(1)
 
-    # Lowercase prefix (c-style: vg_lite_init)
+    # Lowercase prefix (c-style: xx_init)
     match = re.match(r"^([a-z][a-z0-9]*_[a-z0-9]+)", func_name)
     if match:
         return match.group(1)
