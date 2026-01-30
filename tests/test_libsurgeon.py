@@ -1436,3 +1436,186 @@ class TestDirectorySeparation:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ============================================================
+# Test: Code Cleaning Functions
+# ============================================================
+
+
+class TestCleanDecompiledCode:
+    """Tests for clean_decompiled_code function"""
+
+    def test_remove_function_signature_comment(self):
+        """Test removal of function signature comments"""
+        from ghidra_common import clean_decompiled_code
+
+        code = """/* BESplitMatrix(sbematrix const*, sbevec3*, sbequat*, sbevec3*) */
+void BESplitMatrix(sbematrix *param_1, sbevec3 *param_2)
+{
+    int x = 1;
+    return;
+}"""
+        cleaned = clean_decompiled_code(code)
+        assert "/* BESplitMatrix" not in cleaned
+        assert "void BESplitMatrix" in cleaned
+
+    def test_remove_simple_function_name_comment(self):
+        """Test removal of simple function name comments"""
+        from ghidra_common import clean_decompiled_code
+
+        code = """/* TestFunc */
+void TestFunc(void)
+{
+    return;
+}"""
+        cleaned = clean_decompiled_code(code)
+        assert "/* TestFunc */" not in cleaned
+        assert "void TestFunc" in cleaned
+
+    def test_remove_blank_lines_inside_function(self):
+        """Test removal of blank lines inside function body"""
+        from ghidra_common import clean_decompiled_code
+
+        code = """void TestFunc(void)
+
+{
+
+  int x;
+
+  int y;
+
+  x = 1;
+
+  y = 2;
+
+  return;
+
+}"""
+        cleaned = clean_decompiled_code(code)
+        # Should have no blank lines inside the function
+        lines = cleaned.split('\n')
+        inside_braces = False
+        blank_inside = 0
+        for line in lines:
+            if '{' in line:
+                inside_braces = True
+            if '}' in line:
+                inside_braces = False
+            if inside_braces and not line.strip():
+                blank_inside += 1
+        assert blank_inside == 0, f"Found {blank_inside} blank lines inside function"
+
+    def test_preserve_blank_line_between_functions(self):
+        """Test that one blank line is preserved between functions"""
+        from ghidra_common import clean_decompiled_code
+
+        code = """void Func1(void)
+{
+    return;
+}
+
+void Func2(void)
+{
+    return;
+}"""
+        cleaned = clean_decompiled_code(code)
+        # Should have exactly one blank line between functions
+        assert "\n\nvoid Func2" in cleaned or "}\n\nvoid" in cleaned
+
+    def test_collapse_multiple_blank_lines_outside_function(self):
+        """Test that multiple blank lines outside functions are collapsed to one"""
+        from ghidra_common import clean_decompiled_code
+
+        code = """void Func1(void)
+{
+    return;
+}
+
+
+
+void Func2(void)
+{
+    return;
+}"""
+        cleaned = clean_decompiled_code(code)
+        # Should not have more than 2 consecutive newlines (one blank line)
+        assert "\n\n\n" not in cleaned
+
+    def test_handle_empty_code(self):
+        """Test handling of empty or None code"""
+        from ghidra_common import clean_decompiled_code
+
+        assert clean_decompiled_code(None) is None
+        assert clean_decompiled_code("") == ""
+
+    def test_preserve_meaningful_comments(self):
+        """Test that meaningful comments are preserved"""
+        from ghidra_common import clean_decompiled_code
+
+        code = """/* This is a meaningful comment about the function */
+void TestFunc(void)
+{
+    return;
+}"""
+        cleaned = clean_decompiled_code(code)
+        assert "meaningful comment" in cleaned
+
+    def test_real_ghidra_output(self):
+        """Test with real Ghidra-style output"""
+        from ghidra_common import clean_decompiled_code
+
+        code = """/* CMemStore::Alloc(unsigned int, unsigned char, unsigned char, unsigned char, unsigned char, unsigned char, unsigned int) */
+
+void * CMemStore::Alloc(uint param_1,undefined param_2,undefined param_3,undefined param_4,
+
+                       undefined param_5,undefined param_6,undefined4 param_7)
+
+
+
+{
+
+  void *pvVar1;
+
+  undefined4 in_register_0000003c;
+
+  
+
+  pvVar1 = operator_new__(CONCAT44(in_register_0000003c,param_1));
+
+  return pvVar1;
+
+}"""
+        cleaned = clean_decompiled_code(code)
+        
+        # Should remove the signature comment
+        assert "/* CMemStore::Alloc" not in cleaned
+        
+        # Should remove blank lines inside function
+        lines = cleaned.split('\n')
+        # Count lines - should be much fewer
+        assert len(lines) < len(code.split('\n'))
+        
+        # Function should still be valid
+        assert "void * CMemStore::Alloc" in cleaned
+        assert "return pvVar1;" in cleaned
+
+    def test_nested_braces(self):
+        """Test handling of nested braces"""
+        from ghidra_common import clean_decompiled_code
+
+        code = """void TestFunc(void)
+{
+
+  if (x) {
+
+    y = 1;
+
+  }
+
+  return;
+
+}"""
+        cleaned = clean_decompiled_code(code)
+        # Should remove all internal blank lines
+        assert "\n\n" not in cleaned.split('{', 1)[1].rsplit('}', 1)[0]

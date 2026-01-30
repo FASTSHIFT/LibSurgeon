@@ -172,8 +172,6 @@ def main():
             for func, demangled_name in funcs:
                 decompiled = get_decompiled_function_basic(decomp_ifc, func, monitor)
                 if decompiled:
-                    f.write("// Original: {}\n".format(func.getName()))
-                    f.write("// Demangled: {}\n".format(demangled_name))
                     f.write(decompiled)
                     f.write("\n")
                     decompiled_count += 1
@@ -199,7 +197,6 @@ def main():
             for func, display_name in standalone_functions:
                 decompiled = get_decompiled_function_basic(decomp_ifc, func, monitor)
                 if decompiled:
-                    f.write("// Function: {}\n".format(display_name))
                     f.write(decompiled)
                     f.write("\n")
                     decompiled_count += 1
