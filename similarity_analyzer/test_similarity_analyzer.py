@@ -270,8 +270,7 @@ class TestIntegration(unittest.TestCase):
             # Create similar files
             for name in ["DrawerRGB565.cpp", "DrawerRGB888.cpp"]:
                 path = Path(tmpdir) / name
-                path.write_text(
-                    f"""/**
+                path.write_text(f"""/**
  * Auto-generated file
  */
 class {Path(name).stem} {{
@@ -282,8 +281,7 @@ class {Path(name).stem} {{
         }}
     }}
 }};
-"""
-                )
+""")
 
             # Create a different file
             (Path(tmpdir) / "Other.cpp").write_text("completely different content here")

@@ -1494,13 +1494,13 @@ void TestFunc(void)
 }"""
         cleaned = clean_decompiled_code(code)
         # Should have no blank lines inside the function
-        lines = cleaned.split('\n')
+        lines = cleaned.split("\n")
         inside_braces = False
         blank_inside = 0
         for line in lines:
-            if '{' in line:
+            if "{" in line:
                 inside_braces = True
-            if '}' in line:
+            if "}" in line:
                 inside_braces = False
             if inside_braces and not line.strip():
                 blank_inside += 1
@@ -1579,7 +1579,7 @@ void * CMemStore::Alloc(uint param_1,undefined param_2,undefined param_3,undefin
 
   undefined4 in_register_0000003c;
 
-  
+
 
   pvVar1 = operator_new__(CONCAT44(in_register_0000003c,param_1));
 
@@ -1587,15 +1587,15 @@ void * CMemStore::Alloc(uint param_1,undefined param_2,undefined param_3,undefin
 
 }"""
         cleaned = clean_decompiled_code(code)
-        
+
         # Should remove the signature comment
         assert "/* CMemStore::Alloc" not in cleaned
-        
+
         # Should remove blank lines inside function
-        lines = cleaned.split('\n')
+        lines = cleaned.split("\n")
         # Count lines - should be much fewer
-        assert len(lines) < len(code.split('\n'))
-        
+        assert len(lines) < len(code.split("\n"))
+
         # Function should still be valid
         assert "void * CMemStore::Alloc" in cleaned
         assert "return pvVar1;" in cleaned
@@ -1618,4 +1618,4 @@ void * CMemStore::Alloc(uint param_1,undefined param_2,undefined param_3,undefin
 }"""
         cleaned = clean_decompiled_code(code)
         # Should remove all internal blank lines
-        assert "\n\n" not in cleaned.split('{', 1)[1].rsplit('}', 1)[0]
+        assert "\n\n" not in cleaned.split("{", 1)[1].rsplit("}", 1)[0]

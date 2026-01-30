@@ -301,42 +301,42 @@ def should_skip_function(func, program):
 def clean_decompiled_code(code):
     """
     Clean up decompiled code by removing unnecessary comments and blank lines.
-    
+
     Removes:
     - Function signature comments like /* FuncName(args) */
     - Excessive blank lines (keep max 1 between statements, none inside blocks)
-    
+
     Args:
         code: Raw decompiled C code
-        
+
     Returns:
         Cleaned up code
     """
     if not code:
         return code
-    
-    lines = code.split('\n')
+
+    lines = code.split("\n")
     cleaned_lines = []
     prev_blank = False
     inside_function = False
     brace_depth = 0
-    
+
     for line in lines:
         stripped = line.strip()
-        
+
         # Skip function signature comments: /* FuncName(...) */ or /* FuncName */
         # These appear at the start of functions and are redundant
-        if stripped.startswith('/*') and stripped.endswith('*/'):
+        if stripped.startswith("/*") and stripped.endswith("*/"):
             # Check if it looks like a function signature comment
             inner = stripped[2:-2].strip()
             # Skip if it contains parentheses (function signature) or is just a name
-            if '(' in inner or (inner and ' ' not in inner and len(inner) < 100):
+            if "(" in inner or (inner and " " not in inner and len(inner) < 100):
                 continue
-        
+
         # Track brace depth to know if we're inside a function body
-        brace_depth += stripped.count('{') - stripped.count('}')
+        brace_depth += stripped.count("{") - stripped.count("}")
         inside_function = brace_depth > 0
-        
+
         # Handle blank lines
         if not stripped:
             # Inside function body: skip all blank lines for compact code
@@ -348,14 +348,14 @@ def clean_decompiled_code(code):
             prev_blank = True
         else:
             prev_blank = False
-        
+
         cleaned_lines.append(line)
-    
+
     # Remove trailing blank lines
     while cleaned_lines and not cleaned_lines[-1].strip():
         cleaned_lines.pop()
-    
-    return '\n'.join(cleaned_lines)
+
+    return "\n".join(cleaned_lines)
 
 
 def get_decompiled_function_basic(decomp_ifc, func, monitor):
