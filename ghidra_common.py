@@ -315,6 +315,9 @@ def clean_decompiled_code(code):
     if not code:
         return code
 
+    # Normalize line endings (Windows CRLF -> LF)
+    code = code.replace("\r\n", "\n").replace("\r", "\n")
+
     lines = code.split("\n")
     cleaned_lines = []
     prev_blank = False
