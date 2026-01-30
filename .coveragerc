@@ -1,0 +1,25 @@
+[run]
+source = .
+omit =
+    tests/*
+    */tests/*
+    conftest.py
+    */conftest.py
+    setup.py
+    */__pycache__/*
+    */test_*.py
+    test_*.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+
+show_missing = True
+precision = 2
+
+[html]
+directory = htmlcov
